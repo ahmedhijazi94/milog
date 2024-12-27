@@ -35,3 +35,6 @@ jobs:
 
     - name: Run Bot LIV
       run: python liv.py  # Executa o segundo bot
+
+    - name: Run Bot Slid_liv
+      run: python slid_liv.py  # Executa o segundo bot
