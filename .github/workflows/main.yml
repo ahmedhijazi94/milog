@@ -2,7 +2,7 @@ name: Run Bots Daily
 
 on:
   schedule:
-    -- cron: '0 15 * * *'  # Executa a cada 24 horas, às 15h UTC
+    - cron: '0 15 * * *'  # Executa a cada 24 horas, às 15h UTC
   push:
     branches:
       - main
