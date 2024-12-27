@@ -1,16 +1,15 @@
 name: Run Bots Daily
 
-# Definir o agendamento para rodar diariamente às 12:00 UTC
 on:
   schedule:
-    - cron: '28 2 * * *'  # Executa todos os dias às 02:28 UTC, que é 23:28 em Brasília
+    - cron: '30 2 * * *'  # Executa todos os dias às 02:30 UTC (23:30 Brasília)
   push:
     branches:
       - main
 
 jobs:
   run_bots:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # O job vai rodar no Ubuntu mais recente
 
     steps:
     - name: Checkout repository
@@ -24,10 +23,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt  # Instala dependências (caso tenha um arquivo requirements.txt)
+        pip install mysql-connector-python  # Instala o pacote mysql-connector-python (ajuste conforme necessário)
 
-    - name: Run Bot 1
+    - name: Run Bot ESF
       run: python bot_esf.py  # Executa o primeiro bot
 
-    - name: Run Bot 2
+    - name: Run Bot LIV
       run: python bot_liv.py  # Executa o segundo bot
