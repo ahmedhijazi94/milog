@@ -30,7 +30,11 @@ jobs:
         pip install lxml  # Instala o lxml, necessário para BeautifulSoup em alguns casos
         pip install selenium  # Instala o selenium, se necessário para bots que interagem com o navegador
 
-   
+    - name: Run Bot ESF
+      run: python esf.py  # Executa o primeiro bot.
+
+    - name: Run Bot LIV
+      run: python liv.py  # Executa o segundo bot
 
     - name: Run Bot Slid_liv
       run: python slid_liv.py  # Executa o segundo bot
