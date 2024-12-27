@@ -28,7 +28,7 @@ jobs:
         pip install -r requirements.txt  # Instala dependências (caso tenha um arquivo requirements.txt)
 
     - name: Run Bot 1
-      run: python bot1.py  # Executa o primeiro bot
+      run: python esf.py  # Executa o primeiro bot
 
     - name: Run Bot 2
-      run: python bot2.py  # Executa o segundo bot
+      run: python liv.py  # Executa o segundo bot
