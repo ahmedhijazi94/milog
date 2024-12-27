@@ -7,8 +7,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service  # Importação necessária
-from webdriver_manager.chrome import ChromeDriverManager
 import logging
 import json
 import re
@@ -70,8 +68,8 @@ def extrair_banners():
         "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     )
 
-    # Inicializa o WebDriver usando o webdriver_manager com Service
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # Inicializa o WebDriver sem usar webdriver_manager
+    driver = webdriver.Chrome(options=chrome_options)
     driver.set_window_size(1920, 1080)  # Define o tamanho da janela para garantir que todos os elementos sejam carregados
 
     logging.info("Abrindo página principal da Livelo...")
@@ -165,7 +163,7 @@ def extrair_banners():
                 # Se ainda não encontrar, tentar extrair de 'data-gtm-event-action' ou outros atributos
                 if not redirect_link:
                     redirect_link = button.get("data-gtm-event-action", "")
-        
+
         # Cria o dicionário do banner
         banner_data = {
             "texts": banner_texts,
