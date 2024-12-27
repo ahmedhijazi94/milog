@@ -3,8 +3,7 @@ name: Run Bots Daily
 # Definir o agendamento para rodar diariamente às 12:00 UTC
 on:
   schedule:
-    - cron: '19 26 * * *'  # Isso significa que o fluxo será executado todo dia às 12:00 UTC
-  # Esse evento também permite que o fluxo seja executado quando houver um commit no repositório
+    - cron: '28 2 * * *'  # Executa todos os dias às 02:28 UTC, que é 23:28 em Brasília
   push:
     branches:
       - main
