@@ -31,7 +31,7 @@ jobs:
         pip install selenium  # Instala o selenium, se necessário para bots que interagem com o navegador
 
     - name: Run Bot ESF
-      run: python esf.py  # Executa o primeiro bot
+      run: python esf.py  # Executa o primeiro bot.
 
     - name: Run Bot LIV
       run: python liv.py  # Executa o segundo bot
