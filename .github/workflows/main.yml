@@ -1,0 +1,34 @@
+name: Run Bots Daily
+
+# Definir o agendamento para rodar diariamente às 12:00 UTC
+on:
+  schedule:
+    - cron: '19 22 * * *'  # Isso significa que o fluxo será executado todo dia às 12:00 UTC
+  # Esse evento também permite que o fluxo seja executado quando houver um commit no repositório
+  push:
+    branches:
+      - main
+
+jobs:
+  run_bots:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2  # Faz o checkout do código do repositório
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'  # Define a versão do Python a ser usada
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt  # Instala dependências (caso tenha um arquivo requirements.txt)
+
+    - name: Run Bot 1
+      run: python bot1.py  # Executa o primeiro bot
+
+    - name: Run Bot 2
+      run: python bot2.py  # Executa o segundo bot
