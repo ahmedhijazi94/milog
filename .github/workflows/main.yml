@@ -31,10 +31,25 @@ jobs:
         pip install selenium  # Instala o selenium, se necessário para bots que interagem com o navegador
 
     - name: Run Bot ESF
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       run: python esf.py  # Executa o primeiro bot.
 
     - name: Run Bot LIV
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       run: python liv.py  # Executa o segundo bot
 
     - name: Run Bot Slid_liv
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       run: python slid_liv.py  # Executa o segundo bot
