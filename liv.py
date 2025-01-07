@@ -1,3 +1,4 @@
+import os  # ✅ Importação corrigida
 import mysql.connector
 import re
 import time
