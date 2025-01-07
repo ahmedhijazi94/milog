@@ -10,6 +10,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+def get_env_var(var_name: str) -> str:
+    """
+    Lê a variável de ambiente 'var_name'.
+    Se não estiver definida, gera um erro (ValueError).
+    """
+    value = os.getenv(var_name)
+    if not value:
+        raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
+    return value
 
 def conectar_banco():
     """
@@ -33,10 +42,11 @@ def conectar_banco():
 def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
+    Lê os nomes das tabelas somente das variáveis de ambiente.
     """
-    # Lê o nome das tabelas a partir das variáveis de ambiente 
-    table_empresas = os.getenv("TABLE_EMPRESAS_ESF")
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
+    # Lê obrigatoriamente das variáveis de ambiente (sem fallback)
+    table_empresas = get_env_var("TABLE_EMPRESAS_ESF")
+    table_pontuacao = get_env_var("TABLE_PONTUACAO_ESF")
 
     try:
         cursor = connection.cursor()
@@ -65,7 +75,8 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_pontuacao_table_query)
         connection.commit()
-        print(f"[INFO] Tabelas criadas ou já existentes.")
+
+        print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
 
@@ -75,7 +86,8 @@ def obter_empresa_id(nome_empresa, logo, connection):
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
     caso contrário, insere a empresa e retorna o novo ID.
     """
-    table_empresas = os.getenv("TABLE_EMPRESAS_ESF")
+    table_empresas = get_env_var("TABLE_EMPRESAS_ESF")
+
     cursor = connection.cursor()
     cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     empresa = cursor.fetchone()
@@ -118,7 +130,6 @@ def extrair_pontuacao(descricao: str):
         numerador = re.search(r'(\d+,\d+|\d+)\s?pt', descricao)  # Número antes de "pt" ou "pts"
         denominador = re.search(r'(\d+,\d+|\d+)\s?reais', descricao)  
         if numerador and denominador:
-            # Dividir o numerador pelo denominador
             numerador_value = numerador.group(1).replace(',', '.')
             denominador_value = denominador.group(1).replace(',', '.')
             try:
@@ -131,7 +142,6 @@ def extrair_pontuacao(descricao: str):
     if "de" in descricao.lower() and "a" in descricao.lower():
         valores = re.findall(r'\d+,\d+|\d+', descricao)
         if valores:
-            # Retorna o maior valor encontrado
             return moeda, max(valores, key=lambda x: float(x.replace(',', '.')))
 
     # Regra geral: número antes de "pt" ou "pts"
@@ -185,7 +195,6 @@ def extrair_parceiros(connection):
     html = driver.page_source
     driver.quit()
 
-    # Parsear o HTML com BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     div_cards = soup.find_all("div", class_="col-xs-6 col-sm-3 col-lg-2")
     if not div_cards:
@@ -197,17 +206,18 @@ def extrair_parceiros(connection):
     parceiros = []
     for card in div_cards:
         # Nome da empresa
-        nome = card.find("div", class_="-partnerName")
-        nome = nome.get_text(strip=True) if nome else "Nome não encontrado"
+        nome_div = card.find("div", class_="-partnerName")
+        nome = nome_div.get_text(strip=True) if nome_div else "Nome não encontrado"
 
-        # Imagem da logo do parceiro
+        # Imagem da logo
         img_tag = card.find("img")
         logo = img_tag.get("src", "Logo não encontrada") if img_tag else "Logo não encontrada"
 
-        # Pontuação e descrição
-        descricao = card.find("div", class_="-partnerPoints")
-        descricao_text = descricao.get_text(" ", strip=True) if descricao else "Descrição não encontrada"
+        # Descrição
+        descricao_div = card.find("div", class_="-partnerPoints")
+        descricao_text = descricao_div.get_text(" ", strip=True) if descricao_div else "Descrição não encontrada"
 
+        # Extrai pontuação
         moeda, pontuacao = extrair_pontuacao(descricao_text)
 
         empresa_id = obter_empresa_id(nome, logo, connection)
@@ -231,12 +241,11 @@ def salvar_relatorio_mysql(parceiros, connection):
         print("[WARN] Lista de parceiros vazia; não há o que salvar.")
         return
 
-    # Nome da tabela de pontuação a partir da variável de ambiente
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
+    # Lê obrigatoriamente da variável de ambiente (sem fallback)
+    table_pontuacao = get_env_var("TABLE_PONTUACAO_ESF")
 
     try:
         cursor = connection.cursor()
-
         insert_query = f"""
             INSERT INTO {table_pontuacao} (
                 data_hora_coleta, moeda, pontuacao, descricao_text, empresa_id
