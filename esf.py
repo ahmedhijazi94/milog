@@ -16,10 +16,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host='162.241.60.233',  # Exemplo: 'localhost' ou o IP do servidor
-            database='milhas15_wp271',  # Nome do banco de dados
-            user='milhas15_user_bot',  # Nome de usuário
-            password='Hijazi564.'  # Senha fornecida
+            host=os.getenv("DB_HOST"),        # Host do banco de dados
+            database=os.getenv("DB_NAME"),    # Nome do banco de dados
+            user=os.getenv("DB_USER"),        # Usuário do banco de dados
+            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
