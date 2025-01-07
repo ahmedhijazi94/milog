@@ -17,10 +17,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD")
+            host=os.getenv("DB_HOST"),        # Host do banco de dados
+            database=os.getenv("DB_NAME"),    # Nome do banco de dados
+            user=os.getenv("DB_USER"),        # Usuário do banco de dados
+            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -34,12 +34,14 @@ def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
     """
+    # Lê o nome das tabelas a partir das variáveis de ambiente 
+    table_empresas = os.getenv("TABLE_EMPRESAS_ESF")
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
+
     try:
         cursor = connection.cursor()
 
-        table_empresas = os.getenv("TABLE_EMPRESAS_ESF")
-        table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
-
+        # Criação da tabela para as empresas
         create_empresas_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_empresas} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -49,6 +51,7 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_empresas_table_query)
 
+        # Criação da tabela de pontuação
         create_pontuacao_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_pontuacao} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,9 +64,8 @@ def criar_tabelas(connection):
         );
         """
         cursor.execute(create_pontuacao_table_query)
-
         connection.commit()
-        print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
+        print(f"[INFO] Tabelas criadas ou já existentes.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
 
@@ -73,13 +75,13 @@ def obter_empresa_id(nome_empresa, logo, connection):
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
     caso contrário, insere a empresa e retorna o novo ID.
     """
-    cursor = connection.cursor()
     table_empresas = os.getenv("TABLE_EMPRESAS_ESF")
-
+    cursor = connection.cursor()
     cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     empresa = cursor.fetchone()
 
     if empresa:
+        # Empresa já existe, vamos atualizar o logo se for diferente
         empresa_id, current_logo = empresa
         if current_logo != logo:
             cursor.execute(f"UPDATE {table_empresas} SET logo = %s WHERE id = %s", (logo, empresa_id))
@@ -87,6 +89,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
             print(f"[INFO] Logo atualizado para a empresa '{nome_empresa}'.")
         return empresa_id
     else:
+        # Inserir nova empresa com o logo
         cursor.execute(f"INSERT INTO {table_empresas} (nome, logo) VALUES (%s, %s)", (nome_empresa, logo))
         connection.commit()
         print(f"[INFO] Empresa '{nome_empresa}' inserida com sucesso.")
@@ -95,22 +98,27 @@ def obter_empresa_id(nome_empresa, logo, connection):
 
 def extrair_pontuacao(descricao: str):
     """
-    Faz o parse da descrição para identificar a pontuação e a moeda associada.
+    Faz o parse da descrição para identificar a pontuação e a moeda associada:
+      - Moeda (R$, U$, Eu$)
+      - Pontuação associada (x ou valores numéricos)
     """
-    moeda = "R$"
-    pontuacao = "x"
+    moeda = "R$"  # Valor padrão de moeda
+    pontuacao = "x"  # Pontuação padrão
 
-    if "real" in descricao.lower():
+    # Identificar moeda
+    if "real" in descricao.lower():  # Detecta "real" ou "reais"
         moeda = "R$"
-    elif "dólar" in descricao.lower():
+    elif "dólar" in descricao.lower():  # Detecta "dólar"
         moeda = "U$"
-    elif "euro" in descricao.lower():
+    elif "euro" in descricao.lower():  # Detecta "euro"
         moeda = "Eu$"
 
+    # Regra especial: "a cada x reais"
     if "a cada" in descricao.lower() and "reais" in descricao.lower():
-        numerador = re.search(r'(\d+,\d+|\d+)\s?pt', descricao)
-        denominador = re.search(r'(\d+,\d+|\d+)\s?reais', descricao)
+        numerador = re.search(r'(\d+,\d+|\d+)\s?pt', descricao)  # Número antes de "pt" ou "pts"
+        denominador = re.search(r'(\d+,\d+|\d+)\s?reais', descricao)  
         if numerador and denominador:
+            # Dividir o numerador pelo denominador
             numerador_value = numerador.group(1).replace(',', '.')
             denominador_value = denominador.group(1).replace(',', '.')
             try:
@@ -119,6 +127,14 @@ def extrair_pontuacao(descricao: str):
             except ZeroDivisionError:
                 return moeda, "0"
 
+    # Regra 1: "Ganhe de x a x pts" -> extrai o maior valor
+    if "de" in descricao.lower() and "a" in descricao.lower():
+        valores = re.findall(r'\d+,\d+|\d+', descricao)
+        if valores:
+            # Retorna o maior valor encontrado
+            return moeda, max(valores, key=lambda x: float(x.replace(',', '.')))
+
+    # Regra geral: número antes de "pt" ou "pts"
     pontuacao_match = re.search(r'(\d+,\d+|\d+)\s?(pt|pts)', descricao)
     if pontuacao_match:
         return moeda, pontuacao_match.group(1)
@@ -128,7 +144,13 @@ def extrair_pontuacao(descricao: str):
 
 def extrair_parceiros(connection):
     """
-    Acessa a página da Esfera e coleta as informações dos parceiros.
+    Acessa a página da Esfera, coleta as informações dos cards de parceiros
+    e retorna uma lista de dicionários com:
+      - nome
+      - moeda
+      - descricao_text
+      - logo
+      - pontuacao
     """
     url = "https://www.esfera.com.vc/c/ganhe-pontos/esf02163"
 
@@ -147,6 +169,7 @@ def extrair_parceiros(connection):
     print("[INFO] Abrindo página...")
     driver.get(url)
 
+    # Aguardar os cards carregarem
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CLASS_NAME, "box-partner-custom"))
@@ -157,10 +180,12 @@ def extrair_parceiros(connection):
         driver.quit()
         return []
 
-    time.sleep(2)
+    # Capturar o HTML
+    time.sleep(2)  # garantir carregamento final
     html = driver.page_source
     driver.quit()
 
+    # Parsear o HTML com BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     div_cards = soup.find_all("div", class_="col-xs-6 col-sm-3 col-lg-2")
     if not div_cards:
@@ -171,12 +196,15 @@ def extrair_parceiros(connection):
 
     parceiros = []
     for card in div_cards:
+        # Nome da empresa
         nome = card.find("div", class_="-partnerName")
         nome = nome.get_text(strip=True) if nome else "Nome não encontrado"
 
+        # Imagem da logo do parceiro
         img_tag = card.find("img")
         logo = img_tag.get("src", "Logo não encontrada") if img_tag else "Logo não encontrada"
 
+        # Pontuação e descrição
         descricao = card.find("div", class_="-partnerPoints")
         descricao_text = descricao.get_text(" ", strip=True) if descricao else "Descrição não encontrada"
 
@@ -197,21 +225,25 @@ def extrair_parceiros(connection):
 def salvar_relatorio_mysql(parceiros, connection):
     """
     Insere os dados de pontuação no banco de dados MySQL.
+    Relacionando com a empresa.
     """
     if not parceiros:
         print("[WARN] Lista de parceiros vazia; não há o que salvar.")
         return
 
+    # Nome da tabela de pontuação a partir da variável de ambiente
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
+
     try:
         cursor = connection.cursor()
-        table_pontuacao = os.getenv("TABLE_PONTUACAO_ESF")
 
-        for parceiro in parceiros:
-            insert_query = f"""
+        insert_query = f"""
             INSERT INTO {table_pontuacao} (
                 data_hora_coleta, moeda, pontuacao, descricao_text, empresa_id
             ) VALUES (%s, %s, %s, %s, %s)
-            """
+        """
+
+        for parceiro in parceiros:
             data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(insert_query, (
                 data_hora_coleta,
