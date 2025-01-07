@@ -11,6 +11,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
+def get_env_var(var_name: str) -> str:
+    """
+    Lê a variável de ambiente 'var_name'.
+    Se não estiver definida, gera um erro (ValueError).
+    """
+    value = os.getenv(var_name)
+    if not value:
+        raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
+    return value
+
+
 def conectar_banco():
     """
     Conecta ao banco de dados MySQL e retorna o objeto de conexão.
@@ -33,14 +44,15 @@ def conectar_banco():
 def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
+    Lê os nomes das tabelas exclusivamente das variáveis de ambiente.
     """
-    # Lê o nome das tabelas a partir das variáveis de ambiente 
-    table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
+    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
+    table_pontuacao = get_env_var("TABLE_PONTUACAO_LIV")
 
     try:
         cursor = connection.cursor()
-        # Criação da tabela de empresas
+
+        # Criação da tabela para as empresas
         create_empresas_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_empresas} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -50,7 +62,7 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_empresas_table_query)
 
-        # Criação da tabela de pontuação com a coluna descricao_text
+        # Criação da tabela de pontuação
         create_pontuacao_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_pontuacao} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -65,7 +77,7 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_pontuacao_table_query)
         connection.commit()
-        print(f"[INFO] Tabelas criadas ou já existentes.")
+        print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
 
@@ -75,7 +87,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
     caso contrário, insere a empresa e retorna o novo ID.
     """
-    table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
+    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
 
     cursor = connection.cursor()
     cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
@@ -90,7 +102,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
             print(f"[INFO] Logo atualizado para a empresa '{nome_empresa}'.")
         return empresa_id
     else:
-        # Inserir nova empresa com o logo
+        # Inserir nova empresa
         cursor.execute(f"INSERT INTO {table_empresas} (nome, logo) VALUES (%s, %s)", (nome_empresa, logo))
         connection.commit()
         print(f"[INFO] Empresa '{nome_empresa}' inserida com sucesso.")
@@ -123,7 +135,7 @@ def parse_descricao(descricao: str):
         ratio = valor_num / base_money
         pontuacao_clube = round(ratio, 3)
 
-    match_normal = re.search(r"(?:até|=)\s*(\d+(?:,\d+)?)(?=.*Pontos?\s+Livelo)(?!.*no Clube)",
+    match_normal = re.search(r"(?:até|=)\s*(\d+(?:,\d+)?)(?=.*Pontos?\s+Livelo)(?!.*no Clube)", 
                              descricao, re.IGNORECASE)
     if match_normal:
         valor_str = match_normal.group(1).replace(",", ".")
@@ -161,6 +173,7 @@ def extrair_parceiros(connection):
     print("[INFO] Abrindo página...")
     driver.get(url)
 
+    # Tenta clicar no botão de cookies
     try:
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
@@ -169,6 +182,7 @@ def extrair_parceiros(connection):
     except:
         print("[INFO] Nenhum pop-up de cookies encontrado.")
 
+    # Espera os cards carregarem
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
@@ -179,7 +193,7 @@ def extrair_parceiros(connection):
         driver.quit()
         return []
 
-    time.sleep(2)
+    time.sleep(2)  # Pausa para garantir o carregamento
     html = driver.page_source
     driver.quit()
 
@@ -197,7 +211,7 @@ def extrair_parceiros(connection):
         img_tag = card.find("img", class_="parity__card--img")
         nome = img_tag.get("alt", "Nome não encontrado") if img_tag else "Nome não encontrado"
         
-        # Extraindo o link da imagem
+        # Logo
         logo_relativo = img_tag.get("src", "") if img_tag else ""
         logo_completo = f"{logo_relativo}" if logo_relativo else ""
 
@@ -209,6 +223,7 @@ def extrair_parceiros(connection):
         clube_livelo = card.find("div", class_="info__club")
         texto_clube_livelo = clube_livelo.get_text(" ", strip=True) if clube_livelo else ""
 
+        # Ajusta descrição completa para parse_descricao
         if texto_clube_livelo:
             descricao_principal = descricao_principal.lstrip("ou até ").strip()
             descricao_completa = f"{texto_clube_livelo} no Clube Livelo ou até {descricao_principal}"
@@ -233,24 +248,24 @@ def extrair_parceiros(connection):
 def salvar_relatorio_mysql(parceiros, connection):
     """
     Insere os dados de pontuação no banco de dados MySQL.
-    Relacionando com a empresa e incluindo a descrição do parceiro.
+    Relacionando com a empresa e incluindo a descrição.
     """
     if not parceiros:
         print("[WARN] Lista de parceiros vazia; não há o que salvar.")
         return
 
-    # Nome da tabela de pontuação a partir da variável de ambiente
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
+    # Lê apenas da variável de ambiente (sem fallback)
+    table_pontuacao = get_env_var("TABLE_PONTUACAO_LIV")
 
     try:
         cursor = connection.cursor()
-
-        for parceiro in parceiros:
-            insert_query = f"""
+        insert_query = f"""
             INSERT INTO {table_pontuacao} (
                 data_hora_coleta, moeda, pontuacao, pontuacao_clube_livelo, empresa_id, descricao_text
             ) VALUES (%s, %s, %s, %s, %s, %s)
-            """
+        """
+
+        for parceiro in parceiros:
             data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(insert_query, (
                 data_hora_coleta,
