@@ -17,10 +17,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD")
+            host=os.getenv("DB_HOST"),        # Host do banco de dados
+            database=os.getenv("DB_NAME"),    # Nome do banco de dados
+            user=os.getenv("DB_USER"),        # Usuário do banco de dados
+            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -34,12 +34,13 @@ def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
     """
+    # Lê o nome das tabelas a partir das variáveis de ambiente (se não existir, usa um valor padrão)
+    table_empresas = os.getenv("TABLE_EMPRESAS_LIV", "wpxx_empresas_livelo")
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV", "wpxx_livelo_pontuacao")
+
     try:
         cursor = connection.cursor()
-
-        table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
-        table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
-
+        # Criação da tabela de empresas
         create_empresas_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_empresas} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -49,6 +50,7 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_empresas_table_query)
 
+        # Criação da tabela de pontuação com a coluna descricao_text
         create_pontuacao_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_pontuacao} (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,7 +64,6 @@ def criar_tabelas(connection):
         );
         """
         cursor.execute(create_pontuacao_table_query)
-
         connection.commit()
         print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
     except mysql.connector.Error as err:
@@ -74,13 +75,14 @@ def obter_empresa_id(nome_empresa, logo, connection):
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
     caso contrário, insere a empresa e retorna o novo ID.
     """
-    cursor = connection.cursor()
-    table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
+    table_empresas = os.getenv("TABLE_EMPRESAS_LIV", "wpxx_empresas_livelo")
 
+    cursor = connection.cursor()
     cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     empresa = cursor.fetchone()
 
     if empresa:
+        # Empresa já existe, vamos atualizar o logo se for diferente
         empresa_id, current_logo = empresa
         if current_logo != logo:
             cursor.execute(f"UPDATE {table_empresas} SET logo = %s WHERE id = %s", (logo, empresa_id))
@@ -88,6 +90,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
             print(f"[INFO] Logo atualizado para a empresa '{nome_empresa}'.")
         return empresa_id
     else:
+        # Inserir nova empresa com o logo
         cursor.execute(f"INSERT INTO {table_empresas} (nome, logo) VALUES (%s, %s)", (nome_empresa, logo))
         connection.commit()
         print(f"[INFO] Empresa '{nome_empresa}' inserida com sucesso.")
@@ -120,7 +123,7 @@ def parse_descricao(descricao: str):
         ratio = valor_num / base_money
         pontuacao_clube = round(ratio, 3)
 
-    match_normal = re.search(r"(?:até|=)\s*(\d+(?:,\d+)?)(?=.*Pontos?\s+Livelo)(?!.*no Clube)", 
+    match_normal = re.search(r"(?:até|=)\s*(\d+(?:,\d+)?)(?=.*Pontos?\s+Livelo)(?!.*no Clube)",
                              descricao, re.IGNORECASE)
     if match_normal:
         valor_str = match_normal.group(1).replace(",", ".")
@@ -133,7 +136,13 @@ def parse_descricao(descricao: str):
 
 def extrair_parceiros(connection):
     """
-    Acessa a página da Livelo, coleta as informações dos cards de parceiros.
+    Acessa a página da Livelo, coleta as informações dos cards de parceiros
+    e retorna uma lista de dicionários com:
+      - nome
+      - moeda
+      - descricao_text
+      - pontuacao
+      - pontuacao_clube_livelo
     """
     url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
 
@@ -151,6 +160,14 @@ def extrair_parceiros(connection):
 
     print("[INFO] Abrindo página...")
     driver.get(url)
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+        ).click()
+        print("[INFO] Cookies aceitos.")
+    except:
+        print("[INFO] Nenhum pop-up de cookies encontrado.")
 
     try:
         WebDriverWait(driver, 20).until(
@@ -179,20 +196,35 @@ def extrair_parceiros(connection):
     for card in cards:
         img_tag = card.find("img", class_="parity__card--img")
         nome = img_tag.get("alt", "Nome não encontrado") if img_tag else "Nome não encontrado"
-        logo = img_tag.get("src", "") if img_tag else ""
+        
+        # Extraindo o link da imagem
+        logo_relativo = img_tag.get("src", "") if img_tag else ""
+        logo_completo = f"{logo_relativo}" if logo_relativo else ""
 
-        descricao = card.find("div", class_="info__value")
-        descricao_text = descricao.get_text(" ", strip=True) if descricao else "Descrição não encontrada"
+        descricao_principal = ""
+        info_value = card.find("div", class_="info__value")
+        if info_value:
+            descricao_principal = info_value.get_text(" ", strip=True)
 
-        moeda, pontuacao, pontuacao_clube = parse_descricao(descricao_text)
-        empresa_id = obter_empresa_id(nome, logo, connection)
+        clube_livelo = card.find("div", class_="info__club")
+        texto_clube_livelo = clube_livelo.get_text(" ", strip=True) if clube_livelo else ""
+
+        if texto_clube_livelo:
+            descricao_principal = descricao_principal.lstrip("ou até ").strip()
+            descricao_completa = f"{texto_clube_livelo} no Clube Livelo ou até {descricao_principal}"
+        else:
+            descricao_completa = descricao_principal
+
+        moeda, pontuacao, pontuacao_clube = parse_descricao(descricao_completa)
+
+        empresa_id = obter_empresa_id(nome, logo_completo, connection)
 
         parceiros.append({
             "empresa_id": empresa_id,
             "moeda": moeda,
             "pontuacao": pontuacao,
             "pontuacao_clube_livelo": pontuacao_clube,
-            "descricao_text": descricao_text
+            "descricao_text": descricao_completa
         })
 
     return parceiros
@@ -201,14 +233,17 @@ def extrair_parceiros(connection):
 def salvar_relatorio_mysql(parceiros, connection):
     """
     Insere os dados de pontuação no banco de dados MySQL.
+    Relacionando com a empresa e incluindo a descrição do parceiro.
     """
     if not parceiros:
         print("[WARN] Lista de parceiros vazia; não há o que salvar.")
         return
 
+    # Nome da tabela de pontuação a partir da variável de ambiente
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV", "wpxx_livelo_pontuacao")
+
     try:
         cursor = connection.cursor()
-        table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
 
         for parceiro in parceiros:
             insert_query = f"""
@@ -218,14 +253,18 @@ def salvar_relatorio_mysql(parceiros, connection):
             """
             data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(insert_query, (
-                data_hora_coleta, parceiro["moeda"], parceiro["pontuacao"],
-                parceiro["pontuacao_clube_livelo"], parceiro["empresa_id"], parceiro["descricao_text"]
+                data_hora_coleta,
+                parceiro["moeda"],
+                parceiro["pontuacao"],
+                parceiro["pontuacao_clube_livelo"],
+                parceiro["empresa_id"],
+                parceiro["descricao_text"]
             ))
 
         connection.commit()
-        print("[INFO] Dados inseridos com sucesso.")
+        print("[INFO] Dados inseridos no banco de dados com sucesso.")
     except mysql.connector.Error as err:
-        print(f"[ERROR] Erro ao inserir dados no banco: {err}")
+        print(f"[ERROR] Erro ao inserir dados no banco de dados: {err}")
 
 
 def main():
@@ -236,7 +275,6 @@ def main():
         if parceiros:
             salvar_relatorio_mysql(parceiros, connection)
         connection.close()
-
 
 if __name__ == "__main__":
     main()
