@@ -62,6 +62,5 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
         # Se o script "slid_liv.py" também precisa usar as mesmas variáveis de tabelas da Livelo
-        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
-        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
+        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_BANNERS_LIV }}
       run: python slid_liv.py  # Executa o terceiro bot (Slid Liv).
