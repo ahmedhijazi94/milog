@@ -23,12 +23,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install mysql-connector-python  # Instala o pacote mysql-connector-python
-        pip install beautifulsoup4  # Instala o pacote beautifulsoup4
-        pip install requests  # Instala o pacote requests (muito comum para bots)
-        pip install pandas  # Instala o pacote pandas (se necessário para seu bot)
-        pip install lxml  # Instala o lxml, necessário para BeautifulSoup em alguns casos
-        pip install selenium  # Instala o selenium, se necessário para bots que interagem com o navegador
+        pip install mysql-connector-python
+        pip install beautifulsoup4
+        pip install requests
+        pip install pandas
+        pip install lxml
+        pip install selenium
 
     - name: Run Bot ESF
       env:
@@ -36,7 +36,11 @@ jobs:
         DB_NAME: ${{ secrets.DB_NAME }}
         DB_USER: ${{ secrets.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      run: python esf.py  # Executa o primeiro bot.
+
+        # As variáveis para as tabelas do ESF
+        TABLE_EMPRESAS_ESF: ${{ secrets.TABLE_EMPRESAS_ESF }}
+        TABLE_PONTUACAO_ESF: ${{ secrets.TABLE_PONTUACAO_ESF }}
+      run: python esf.py  # Executa o primeiro bot (Esfera).
 
     - name: Run Bot LIV
       env:
@@ -44,7 +48,11 @@ jobs:
         DB_NAME: ${{ secrets.DB_NAME }}
         DB_USER: ${{ secrets.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      run: python liv.py  # Executa o segundo bot
+
+        # As variáveis para as tabelas do LIV
+        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
+        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
+      run: python liv.py  # Executa o segundo bot (Livelo).
 
     - name: Run Bot Slid_liv
       env:
@@ -52,4 +60,8 @@ jobs:
         DB_NAME: ${{ secrets.DB_NAME }}
         DB_USER: ${{ secrets.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      run: python slid_liv.py  # Executa o segundo bot
+
+        # Se o script "slid_liv.py" também precisa usar as mesmas variáveis de tabelas da Livelo
+        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
+        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
+      run: python slid_liv.py  # Executa o terceiro bot (Slid Liv).
