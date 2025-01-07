@@ -34,9 +34,9 @@ def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
     """
-    # Lê o nome das tabelas a partir das variáveis de ambiente (se não existir, usa um valor padrão)
-    table_empresas = os.getenv("TABLE_EMPRESAS_LIV", "wpxx_empresas_livelo")
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV", "wpxx_livelo_pontuacao")
+    # Lê o nome das tabelas a partir das variáveis de ambiente 
+    table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
 
     try:
         cursor = connection.cursor()
@@ -65,7 +65,7 @@ def criar_tabelas(connection):
         """
         cursor.execute(create_pontuacao_table_query)
         connection.commit()
-        print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
+        print(f"[INFO] Tabelas criadas ou já existentes.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
 
@@ -75,7 +75,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
     caso contrário, insere a empresa e retorna o novo ID.
     """
-    table_empresas = os.getenv("TABLE_EMPRESAS_LIV", "wpxx_empresas_livelo")
+    table_empresas = os.getenv("TABLE_EMPRESAS_LIV")
 
     cursor = connection.cursor()
     cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
@@ -240,7 +240,7 @@ def salvar_relatorio_mysql(parceiros, connection):
         return
 
     # Nome da tabela de pontuação a partir da variável de ambiente
-    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV", "wpxx_livelo_pontuacao")
+    table_pontuacao = os.getenv("TABLE_PONTUACAO_LIV")
 
     try:
         cursor = connection.cursor()
