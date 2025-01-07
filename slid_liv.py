@@ -15,6 +15,16 @@ import re
 # Configuração do logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def get_env_var(var_name: str) -> str:
+    """
+    Lê a variável de ambiente 'var_name'.
+    Se não estiver definida, gera um erro (ValueError).
+    """
+    value = os.getenv(var_name)
+    if not value:
+        raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
+    return value
+
 def conectar_banco():
     """
     Conecta ao banco de dados MySQL e retorna o objeto de conexão.
@@ -35,12 +45,16 @@ def conectar_banco():
 
 def criar_tabela_banners(connection):
     """
-    Cria a tabela wpxx_banners_livelo no banco de dados caso ela não exista.
+    Cria a tabela no banco de dados caso ela não exista.
+    O nome da tabela é lido obrigatoriamente da variável de ambiente.
     """
+    # Lê o nome da tabela (sem fallback)
+    table_banners = get_env_var("TABLE_BANNERS_LIV")
+
     try:
         cursor = connection.cursor()
-        create_table_query = """
-        CREATE TABLE IF NOT EXISTS wpxx_banners_livelo (
+        create_table_query = f"""
+        CREATE TABLE IF NOT EXISTS {table_banners} (
             id INT AUTO_INCREMENT PRIMARY KEY,
             datahora_coleta DATETIME NOT NULL,
             banners JSON NOT NULL
@@ -48,7 +62,7 @@ def criar_tabela_banners(connection):
         """
         cursor.execute(create_table_query)
         connection.commit()
-        logging.info("Tabela 'wpxx_banners_livelo' criada ou já existente.")
+        logging.info(f"Tabela '{table_banners}' criada ou já existente.")
     except mysql.connector.Error as err:
         logging.error(f"Erro ao criar a tabela: {err}")
 
@@ -69,9 +83,9 @@ def extrair_banners():
         "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     )
 
-    # Inicializa o WebDriver sem usar webdriver_manager
+    # Inicializa o WebDriver
     driver = webdriver.Chrome(options=chrome_options)
-    driver.set_window_size(1920, 1080)  # Define o tamanho da janela para garantir que todos os elementos sejam carregados
+    driver.set_window_size(1920, 1080)
 
     logging.info("Abrindo página principal da Livelo...")
     driver.get(url)
@@ -123,56 +137,49 @@ def extrair_banners():
         # Extrai todos os textos do banner
         texts = []
 
-        # Extrai títulos (h1, h2, h3) e adiciona ao texto
+        # Extrai títulos (h1, h2, h3)
         title_tags = banner_div.find_all(["h1", "h2", "h3"])
         for tag in title_tags:
             text = tag.get_text(strip=True)
             if text:
                 texts.append(text)
 
-        # Extrai textos adicionais dentro de spans com classes específicas
+        # Extrai spans com classes que começem com 'text--'
         span_tags = banner_div.find_all("span", class_=re.compile(r'^text--'))
         for span in span_tags:
             text = span.get_text(strip=True)
             if text:
                 texts.append(text)
 
-        # Extrai textos em parágrafos ou outras tags, se necessário
-        # Você pode adicionar mais seletores conforme a estrutura da página
+        # Extrai parágrafos
         p_tags = banner_div.find_all("p")
         for p in p_tags:
             text = p.get_text(strip=True)
             if text:
                 texts.append(text)
 
-        # Concatenar todos os textos extraídos em uma única string ou manter como lista
-        # Aqui, vamos manter como lista para maior flexibilidade
-        banner_texts = texts
-
-        # Extrai o link de redirecionamento (presumindo que o botão está presente)
+        # Link de redirecionamento
         button = banner_div.find("button", class_=re.compile(r'banner-carousel-button'))
         redirect_link = ""
         if button:
-            # O link pode estar associado a uma função JavaScript ou atributo 'data-gtm-event-label'
             onclick_attr = button.get("onclick", "")
             match = re.search(r"window\.location\.href=['\"](.*?)['\"]", onclick_attr)
             if match:
                 redirect_link = match.group(1)
             else:
-                # Alternativamente, extrair de 'data-gtm-event-label' ou outro atributo
+                # Alternativamente, extrair de 'data-gtm-event-label'
                 redirect_link = button.get("data-gtm-event-label", "")
-                # Se ainda não encontrar, tentar extrair de 'data-gtm-event-action' ou outros atributos
                 if not redirect_link:
+                    # Tentar extrair de 'data-gtm-event-action'
                     redirect_link = button.get("data-gtm-event-action", "")
 
-        # Cria o dicionário do banner
         banner_data = {
-            "texts": banner_texts,
+            "texts": texts,  # lista de todos os textos extraídos
             "redirect_link": redirect_link
         }
 
-        # Validação básica: pelo menos um texto ou um link deve existir
-        if banner_texts or redirect_link:
+        # Validação: pelo menos um texto ou link precisa existir
+        if texts or redirect_link:
             banners.append(banner_data)
             logging.info(f"BANNER {idx}: Texto extraído com sucesso.")
         else:
@@ -189,14 +196,18 @@ def salvar_banners_mysql(banners, connection):
         logging.warning("Lista de banners vazia; não há o que salvar.")
         return
 
+    # Lê o nome da tabela de banners (sem fallback)
+    table_banners = get_env_var("TABLE_BANNERS_LIV")
+
     try:
         cursor = connection.cursor()
-        insert_query = """
-        INSERT INTO wpxx_banners_livelo (datahora_coleta, banners)
+        insert_query = f"""
+        INSERT INTO {table_banners} (datahora_coleta, banners)
         VALUES (%s, %s)
         """
         data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         banners_json = json.dumps(banners, ensure_ascii=False)  # Garante que caracteres especiais sejam mantidos
+
         cursor.execute(insert_query, (
             data_hora_coleta,
             banners_json
