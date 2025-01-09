@@ -3,12 +3,17 @@ import mysql.connector
 import re
 import time
 from datetime import datetime
+from collections import Counter
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente do arquivo .env
+load_dotenv()
 
 def get_env_var(var_name: str) -> str:
     """
@@ -26,10 +31,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),        # Host do banco de dados
-            database=os.getenv("DB_NAME"),    # Nome do banco de dados
-            user=os.getenv("DB_USER"),        # Usuário do banco de dados
-            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
+            host=get_env_var("DB_HOST"),        # Host do banco de dados
+            database=get_env_var("DB_NAME"),    # Nome do banco de dados
+            user=get_env_var("DB_USER"),        # Usuário do banco de dados
+            password=get_env_var("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -37,7 +42,6 @@ def conectar_banco():
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
-
 
 def criar_tabelas(connection):
     """
@@ -56,7 +60,8 @@ def criar_tabelas(connection):
         CREATE TABLE IF NOT EXISTS {table_empresas} (
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome VARCHAR(255) UNIQUE NOT NULL,
-            logo VARCHAR(255)
+            logo VARCHAR(255),
+            label_pontuacao VARCHAR(50) DEFAULT 'Sem Dados' -- Novo campo para label de pontuação
         );
         """
         cursor.execute(create_empresas_table_query)
@@ -79,7 +84,6 @@ def criar_tabelas(connection):
         print(f"[INFO] Tabelas '{table_empresas}' e '{table_pontuacao}' criadas ou já existentes.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
-
 
 def obter_empresa_id(nome_empresa, logo, connection):
     """
@@ -106,7 +110,6 @@ def obter_empresa_id(nome_empresa, logo, connection):
         connection.commit()
         print(f"[INFO] Empresa '{nome_empresa}' inserida com sucesso.")
         return cursor.lastrowid
-
 
 def extrair_pontuacao(descricao: str):
     """
@@ -150,7 +153,6 @@ def extrair_pontuacao(descricao: str):
         return moeda, pontuacao_match.group(1)
 
     return moeda, pontuacao
-
 
 def extrair_parceiros(connection):
     """
@@ -231,11 +233,72 @@ def extrair_parceiros(connection):
 
     return parceiros
 
+def calcular_moda(pontuacoes):
+    """
+    Calcula a moda de uma lista de pontuações.
+
+    Args:
+        pontuacoes (list of float): Lista de pontuações.
+
+    Returns:
+        float: Moda da lista. Se houver múltiplas modas, retorna a maior.
+    """
+    if not pontuacoes:
+        return 0
+
+    contador = Counter(pontuacoes)
+    max_freq = max(contador.values())
+    modas = [pont for pont, freq in contador.items() if freq == max_freq]
+    return max(modas)  # Retorna a maior moda se houver múltiplas
+
+def calcular_label_pontuacao(pontuacoes):
+    """
+    Calcula a label de pontuação com base nas pontuações históricas.
+
+    Args:
+        pontuacoes (list of float): Lista de pontuações do parceiro.
+
+    Returns:
+        str: Label da pontuação.
+    """
+    if not pontuacoes:
+        return "Sem Dados"
+
+    # Calculando as métricas necessárias
+    min_val = min(pontuacoes)
+    max_val = max(pontuacoes)
+    mode_val = calcular_moda(pontuacoes)  # Função para calcular a moda
+    last_val = pontuacoes[-1]  # Última pontuação inserida
+
+    # Definindo os thresholds
+    excellent_threshold = mode_val * 2
+    good_threshold = mode_val
+    poor_threshold = mode_val / 2
+
+    # Determinando a label
+    if max_val <= 0 or min_val == max_val:
+        return "Pontuação Normal"
+
+    if last_val > excellent_threshold:
+        return "Ótima Pontuação"
+    elif good_threshold < last_val <= excellent_threshold:
+        return "Boa Pontuação"
+    elif last_val == mode_val:
+        return "Pontuação Normal"
+    elif poor_threshold <= last_val < good_threshold:
+        return "Pouco Abaixo do Normal"
+    else:
+        return "Má Pontuação"
 
 def salvar_relatorio_mysql(parceiros, connection):
     """
     Insere os dados de pontuação no banco de dados MySQL.
-    Relacionando com a empresa.
+    Relaciona com a empresa e inclui a descrição.
+    Atualiza a label_pontuacao na tabela de empresas.
+
+    Args:
+        parceiros (list of dict): Lista de parceiros com suas pontuações.
+        connection: Objeto de conexão MySQL.
     """
     if not parceiros:
         print("[WARN] Lista de parceiros vazia; não há o que salvar.")
@@ -243,6 +306,7 @@ def salvar_relatorio_mysql(parceiros, connection):
 
     # Lê obrigatoriamente da variável de ambiente (sem fallback)
     table_pontuacao = get_env_var("TABLE_PONTUACAO_ESF")
+    table_empresas = get_env_var("TABLE_EMPRESAS_ESF")
 
     try:
         cursor = connection.cursor()
@@ -254,19 +318,49 @@ def salvar_relatorio_mysql(parceiros, connection):
 
         for parceiro in parceiros:
             data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Converter pontuacao para float se possível
+            try:
+                pontuacao_float = float(parceiro["pontuacao"])
+            except ValueError:
+                pontuacao_float = 0.0  # Ou outra lógica de tratamento
             cursor.execute(insert_query, (
                 data_hora_coleta,
                 parceiro["moeda"],
-                parceiro["pontuacao"],
+                pontuacao_float,
                 parceiro["descricao_text"],
                 parceiro["empresa_id"]
             ))
 
         connection.commit()
         print("[INFO] Dados inseridos no banco de dados com sucesso.")
+
+        # Após inserir, atualizar a label_pontuacao para cada parceiro
+        for parceiro in parceiros:
+            empresa_id = parceiro["empresa_id"]
+
+            # Recuperar todas as pontuações do parceiro
+            cursor.execute(f"""
+                SELECT pontuacao FROM {table_pontuacao}
+                WHERE empresa_id = %s ORDER BY data_hora_coleta ASC
+            """, (empresa_id,))
+            resultados = cursor.fetchall()
+            pontuacoes = [row[0] for row in resultados]
+
+            # Calcular a label
+            label = calcular_label_pontuacao(pontuacoes)
+
+            # Atualizar a tabela de empresas
+            cursor.execute(f"""
+                UPDATE {table_empresas}
+                SET label_pontuacao = %s
+                WHERE id = %s
+            """, (label, empresa_id))
+            print(f"[INFO] label_pontuacao atualizado para a empresa ID {empresa_id}: {label}")
+
+        connection.commit()
+        print("[INFO] Labels de pontuação atualizadas com sucesso.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Erro ao inserir dados no banco de dados: {err}")
-
 
 def main():
     connection = conectar_banco()
@@ -276,7 +370,6 @@ def main():
         if parceiros:
             salvar_relatorio_mysql(parceiros, connection)
         connection.close()
-
 
 if __name__ == "__main__":
     main()
