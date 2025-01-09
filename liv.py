@@ -1,4 +1,4 @@
-import os
+import os  # ✅ Importação corrigida
 import mysql.connector
 import re
 import time
@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+
 def get_env_var(var_name: str) -> str:
     """
     Lê a variável de ambiente 'var_name'.
@@ -20,6 +21,7 @@ def get_env_var(var_name: str) -> str:
     if not value:
         raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
     return value
+
 
 def conectar_banco():
     """
@@ -39,6 +41,7 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
+
 def criar_tabelas(connection):
     """
     Cria as tabelas no banco de dados caso elas não existam.
@@ -56,8 +59,7 @@ def criar_tabelas(connection):
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome VARCHAR(255) UNIQUE NOT NULL,
             logo VARCHAR(255),
-            label_pontuacao VARCHAR(50) DEFAULT 'Sem Dados',
-            sobre TEXT DEFAULT NULL -- Novo campo para descrição sobre a empresa
+            label_pontuacao VARCHAR(50) DEFAULT 'Sem Dados' -- Novo campo para label de pontuação
         );
         """
         cursor.execute(create_empresas_table_query)
@@ -72,8 +74,6 @@ def criar_tabelas(connection):
             pontuacao_clube_livelo FLOAT,
             empresa_id INT,
             descricao_text TEXT,
-            regra TEXT DEFAULT NULL, -- Novo campo para regra
-            regulamento_doc VARCHAR(255) DEFAULT NULL, -- Novo campo para URL do regulamento
             FOREIGN KEY (empresa_id) REFERENCES {table_empresas}(id)
         );
         """
@@ -83,6 +83,7 @@ def criar_tabelas(connection):
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível criar as tabelas: {err}")
 
+
 def obter_empresa_id(nome_empresa, logo, connection):
     """
     Verifica se a empresa já está cadastrada. Se sim, atualiza o logo,
@@ -91,12 +92,12 @@ def obter_empresa_id(nome_empresa, logo, connection):
     table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
 
     cursor = connection.cursor()
-    cursor.execute(f"SELECT id, logo, sobre FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
+    cursor.execute(f"SELECT id, logo FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     empresa = cursor.fetchone()
 
     if empresa:
         # Empresa já existe, vamos atualizar o logo se for diferente
-        empresa_id, current_logo, current_sobre = empresa
+        empresa_id, current_logo = empresa
         if current_logo != logo:
             cursor.execute(f"UPDATE {table_empresas} SET logo = %s WHERE id = %s", (logo, empresa_id))
             connection.commit()
@@ -108,6 +109,7 @@ def obter_empresa_id(nome_empresa, logo, connection):
         connection.commit()
         print(f"[INFO] Empresa '{nome_empresa}' inserida com sucesso.")
         return cursor.lastrowid
+
 
 def parse_descricao(descricao: str):
     """
@@ -145,50 +147,6 @@ def parse_descricao(descricao: str):
 
     return moeda, pontuacao, pontuacao_clube
 
-def extrair_detalhes_parceiro(driver, connection, empresa_id):
-    """
-    Extraí detalhes adicionais de um parceiro a partir da página de detalhes.
-    
-    Args:
-        driver: Instância do Selenium WebDriver já na página de detalhes.
-        connection: Conexão com o banco de dados.
-        empresa_id: ID da empresa no banco de dados.
-    
-    Returns:
-        dict: Dicionário com 'regra', 'regulamento_doc' e 'sobre'.
-    """
-    detalhes = {
-        "regra": None,
-        "regulamento_doc": None,
-        "sobre": None
-    }
-
-    try:
-        # Extrair 'regra'
-        regra_element = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div.partners-important-guidelines-component_one-content-description"))
-        )
-        detalhes["regra"] = regra_element.text.strip()
-        print("[INFO] 'regra' extraída com sucesso.")
-
-        # Extrair 'regulamento_doc'
-        regulamento_element = driver.find_element(By.CSS_SELECTOR, "a.partners-important-guidelines-component_two-rules")
-        detalhes["regulamento_doc"] = regulamento_element.get_attribute("href").strip()
-        print("[INFO] 'regulamento_doc' extraída com sucesso.")
-
-        # Extrair 'sobre'
-        try:
-            sobre_element = driver.find_element(By.CSS_SELECTOR, "div.partners-faq-component_one-content-description")
-            detalhes["sobre"] = sobre_element.text.strip()
-            print("[INFO] 'sobre' extraído com sucesso.")
-        except:
-            print("[WARN] Elemento 'sobre' não encontrado.")
-            detalhes["sobre"] = None
-
-    except Exception as e:
-        print(f"[ERROR] Erro ao extrair detalhes do parceiro: {e}")
-
-    return detalhes
 
 def extrair_parceiros(connection):
     """
@@ -199,9 +157,6 @@ def extrair_parceiros(connection):
       - descricao_text
       - pontuacao
       - pontuacao_clube_livelo
-      - regra
-      - regulamento_doc
-      - sobre
     """
     url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
 
@@ -217,134 +172,80 @@ def extrair_parceiros(connection):
     driver = webdriver.Chrome(options=chrome_options)
     driver.set_window_size(1920, 1080)
 
+    print("[INFO] Abrindo página...")
+    driver.get(url)
+
+    # Tenta clicar no botão de cookies
     try:
-        print("[INFO] Abrindo página...")
-        driver.get(url)
+        WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+        ).click()
+        print("[INFO] Cookies aceitos.")
+    except:
+        print("[INFO] Nenhum pop-up de cookies encontrado.")
 
-        # Tenta clicar no botão de cookies
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-            ).click()
-            print("[INFO] Cookies aceitos.")
-        except:
-            print("[INFO] Nenhum pop-up de cookies encontrado.")
-
-        # Espera os cards carregarem
-        try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
-            )
-            print("[INFO] Cards encontrados.")
-        except:
-            print("[ERROR] Timeout ao esperar os cards.")
-            driver.quit()
-            return []
-
-        time.sleep(2)  # Pausa para garantir o carregamento
-        html = driver.page_source
-        soup = BeautifulSoup(html, "html.parser")
-        div_cards = soup.find("div", id="div-cardsParity")
-        if not div_cards:
-            print("[ERROR] Não foi possível encontrar a div com os cards.")
-            driver.quit()
-            return []
-
-        cards = div_cards.find_all("div", class_="parity__card")
-        print(f"[INFO] Total de cards encontrados: {len(cards)}")
-
-        parceiros = []
-        for index, card in enumerate(cards, start=1):
-            print(f"[INFO] Processando parceiro {index}/{len(cards)}")
-            img_tag = card.find("img", class_="parity__card--img")
-            nome = img_tag.get("alt", "Nome não encontrado") if img_tag else "Nome não encontrado"
-            
-            # Logo
-            logo_relativo = img_tag.get("src", "") if img_tag else ""
-            logo_completo = f"{logo_relativo}" if logo_relativo else ""
-
-            descricao_principal = ""
-            info_value = card.find("div", class_="info__value")
-            if info_value:
-                descricao_principal = info_value.get_text(" ", strip=True)
-
-            clube_livelo = card.find("div", class_="info__club")
-            texto_clube_livelo = clube_livelo.get_text(" ", strip=True) if clube_livelo else ""
-
-            # Ajusta descrição completa para parse_descricao
-            if texto_clube_livelo:
-                descricao_principal = descricao_principal.lstrip("ou até ").strip()
-                descricao_completa = f"{texto_clube_livelo} no Clube Livelo ou até {descricao_principal}"
-            else:
-                descricao_completa = descricao_principal
-
-            moeda, pontuacao, pontuacao_clube = parse_descricao(descricao_completa)
-
-            empresa_id = obter_empresa_id(nome, logo_completo, connection)
-
-            # Clicar no botão de 'Know More' para extrair detalhes adicionais
-            try:
-                # Localizar o botão dentro do card
-                botao_know_more = card.find("button", class_="button__knowmore--info")
-                if botao_know_more:
-                    # Extrair o XPath ou outra maneira de localizar o botão via Selenium
-                    # Uma abordagem é encontrar o índice do card e construir o seletor
-                    # Alternativamente, você pode usar JavaScript para clicar diretamente no elemento
-                    botao_selenium = driver.find_elements(By.CSS_SELECTOR, "button.button__knowmore--info")[index-1]
-                    botao_selenium.click()
-                    print(f"[INFO] Clicado no botão 'Know More' do parceiro '{nome}'.")
-
-                    # Esperar a navegação para a página de detalhes
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.partners-important-guidelines-component"))
-                    )
-                    print("[INFO] Página de detalhes carregada.")
-
-                    # Extrair os detalhes
-                    detalhes = extrair_detalhes_parceiro(driver, connection, empresa_id)
-
-                    # Navegar de volta para a página principal
-                    driver.back()
-                    print("[INFO] Voltou para a página principal.")
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
-                    )
-                    time.sleep(2)  # Garantir que a página voltou a carregar
-                else:
-                    print(f"[WARN] Botão 'Know More' não encontrado para o parceiro '{nome}'.")
-                    detalhes = {
-                        "regra": None,
-                        "regulamento_doc": None,
-                        "sobre": None
-                    }
-            except Exception as e:
-                print(f"[ERROR] Erro ao clicar no botão 'Know More' ou extrair detalhes: {e}")
-                detalhes = {
-                    "regra": None,
-                    "regulamento_doc": None,
-                    "sobre": None
-                }
-
-            parceiro_info = {
-                "empresa_id": empresa_id,
-                "moeda": moeda,
-                "pontuacao": pontuacao,
-                "pontuacao_clube_livelo": pontuacao_clube,
-                "descricao_text": descricao_completa,
-                "regra": detalhes["regra"],
-                "regulamento_doc": detalhes["regulamento_doc"],
-                "sobre": detalhes["sobre"]
-            }
-
-            parceiros.append(parceiro_info)
-
-        driver.quit()
-        return parceiros
-
-    except Exception as e:
-        print(f"[ERROR] Erro durante a extração de parceiros: {e}")
+    # Espera os cards carregarem
+    try:
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
+        )
+        print("[INFO] Cards encontrados.")
+    except:
+        print("[ERROR] Timeout ao esperar os cards.")
         driver.quit()
         return []
+
+    time.sleep(2)  # Pausa para garantir o carregamento
+    html = driver.page_source
+    driver.quit()
+
+    soup = BeautifulSoup(html, "html.parser")
+    div_cards = soup.find("div", id="div-cardsParity")
+    if not div_cards:
+        print("[ERROR] Não foi possível encontrar a div com os cards.")
+        return []
+
+    cards = div_cards.find_all("div", class_="parity__card")
+    print(f"[INFO] Total de cards encontrados: {len(cards)}")
+
+    parceiros = []
+    for card in cards:
+        img_tag = card.find("img", class_="parity__card--img")
+        nome = img_tag.get("alt", "Nome não encontrado") if img_tag else "Nome não encontrado"
+        
+        # Logo
+        logo_relativo = img_tag.get("src", "") if img_tag else ""
+        logo_completo = f"{logo_relativo}" if logo_relativo else ""
+
+        descricao_principal = ""
+        info_value = card.find("div", class_="info__value")
+        if info_value:
+            descricao_principal = info_value.get_text(" ", strip=True)
+
+        clube_livelo = card.find("div", class_="info__club")
+        texto_clube_livelo = clube_livelo.get_text(" ", strip=True) if clube_livelo else ""
+
+        # Ajusta descrição completa para parse_descricao
+        if texto_clube_livelo:
+            descricao_principal = descricao_principal.lstrip("ou até ").strip()
+            descricao_completa = f"{texto_clube_livelo} no Clube Livelo ou até {descricao_principal}"
+        else:
+            descricao_completa = descricao_principal
+
+        moeda, pontuacao, pontuacao_clube = parse_descricao(descricao_completa)
+
+        empresa_id = obter_empresa_id(nome, logo_completo, connection)
+
+        parceiros.append({
+            "empresa_id": empresa_id,
+            "moeda": moeda,
+            "pontuacao": pontuacao,
+            "pontuacao_clube_livelo": pontuacao_clube,
+            "descricao_text": descricao_completa
+        })
+
+    return parceiros
+
 
 def calcular_moda(pontuacoes):
     """
@@ -363,6 +264,7 @@ def calcular_moda(pontuacoes):
     max_freq = max(contador.values())
     modas = [pont for pont, freq in contador.items() if freq == max_freq]
     return max(modas)  # Retorna a maior moda se houver múltiplas
+
 
 def calcular_label_pontuacao(pontuacoes):
     """
@@ -388,7 +290,7 @@ def calcular_label_pontuacao(pontuacoes):
     good_threshold = mode_val
     poor_threshold = mode_val / 2
 
-    # Definindo as labels
+    # Determinando a label
     if max_val <= 0 or min_val == max_val:
         return "Pontuação Normal"
 
@@ -403,12 +305,12 @@ def calcular_label_pontuacao(pontuacoes):
     else:
         return "Má Pontuação"
 
+
 def salvar_relatorio_mysql(parceiros, connection):
     """
     Insere os dados de pontuação no banco de dados MySQL.
     Relaciona com a empresa e inclui a descrição.
     Atualiza a label_pontuacao na tabela de empresas.
-    Atualiza os novos campos: regra, regulamento_doc e sobre.
 
     Args:
         parceiros (list of dict): Lista de parceiros com suas pontuações.
@@ -426,8 +328,8 @@ def salvar_relatorio_mysql(parceiros, connection):
         cursor = connection.cursor()
         insert_query = f"""
             INSERT INTO {table_pontuacao} (
-                data_hora_coleta, moeda, pontuacao, pontuacao_clube_livelo, empresa_id, descricao_text, regra, regulamento_doc
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                data_hora_coleta, moeda, pontuacao, pontuacao_clube_livelo, empresa_id, descricao_text
+            ) VALUES (%s, %s, %s, %s, %s, %s)
         """
 
         for parceiro in parceiros:
@@ -438,15 +340,13 @@ def salvar_relatorio_mysql(parceiros, connection):
                 parceiro["pontuacao"],
                 parceiro["pontuacao_clube_livelo"],
                 parceiro["empresa_id"],
-                parceiro["descricao_text"],
-                parceiro["regra"],
-                parceiro["regulamento_doc"]
+                parceiro["descricao_text"]
             ))
 
         connection.commit()
         print("[INFO] Dados inseridos no banco de dados com sucesso.")
 
-        # Após inserir, atualizar a label_pontuacao e 'sobre' para cada parceiro
+        # Após inserir, atualizar a label_pontuacao para cada parceiro
         for parceiro in parceiros:
             empresa_id = parceiro["empresa_id"]
 
@@ -469,26 +369,11 @@ def salvar_relatorio_mysql(parceiros, connection):
             """, (label, empresa_id))
             print(f"[INFO] label_pontuacao atualizado para a empresa ID {empresa_id}: {label}")
 
-            # Atualizar o campo 'sobre' se estiver disponível e ainda não tiver sido atualizado
-            sobre = parceiro.get("sobre")
-            if sobre:
-                cursor.execute(f"""
-                    SELECT sobre FROM {table_empresas}
-                    WHERE id = %s
-                """, (empresa_id,))
-                current_sobre = cursor.fetchone()[0]
-                if not current_sobre:
-                    cursor.execute(f"""
-                        UPDATE {table_empresas}
-                        SET sobre = %s
-                        WHERE id = %s
-                    """, (sobre, empresa_id))
-                    print(f"[INFO] Campo 'sobre' atualizado para a empresa ID {empresa_id}.")
-
         connection.commit()
-        print("[INFO] Labels de pontuação e descrições atualizadas com sucesso.")
+        print("[INFO] Labels de pontuação atualizadas com sucesso.")
     except mysql.connector.Error as err:
         print(f"[ERROR] Erro ao inserir dados no banco de dados: {err}")
+
 
 def main():
     connection = conectar_banco()
@@ -498,6 +383,7 @@ def main():
         if parceiros:
             salvar_relatorio_mysql(parceiros, connection)
         connection.close()
+
 
 if __name__ == "__main__":
     main()
