@@ -283,19 +283,22 @@ def extrair_parceiros(connection):
 
             empresa_id = obter_empresa_id(nome, logo_completo, connection)
 
-            # Clicar no botão de 'Know More' para extrair detalhes adicionais
+            # Extrair a URL 'knowmore' via Knockout.js
             try:
                 # Localizar o link 'Know More' dentro do card
                 know_more_link = card.find("a", class_="button__knowmore--link")
                 if know_more_link:
-                    # Extrair o href para navegar diretamente
-                    href = know_more_link.get("href")
-                    if href:
-                        detalhes_url = href if href.startswith("http") else f"https://www.livelo.com.br{href}"
+                    # Usar JavaScript para obter o contexto de dados do Knockout.js
+                    detalhes_url = driver.execute_script("return ko.dataFor(arguments[0]).knowmore;", know_more_link)
+                    if detalhes_url:
+                        # Completar a URL se for relativa
+                        if detalhes_url.startswith("/"):
+                            detalhes_url = f"https://www.livelo.com.br{detalhes_url}"
+                        
                         print(f"[INFO] Navegando para detalhes do parceiro '{nome}' em {detalhes_url}")
-                        driver.execute_script("window.open('');")  # Abrir nova aba
-                        driver.switch_to.window(driver.window_handles[1])  # Mudar para nova aba
-                        driver.get(detalhes_url)
+                        # Abrir a URL de detalhes
+                        driver.execute_script(f"window.open('{detalhes_url}', '_blank');")
+                        driver.switch_to.window(driver.window_handles[1])  # Mudar para a nova aba
 
                         # Extrair os detalhes
                         detalhes = extrair_detalhes_parceiro(driver)
@@ -320,7 +323,7 @@ def extrair_parceiros(connection):
                         "sobre": None
                     }
             except Exception as e:
-                print(f"[ERROR] Erro ao navegar para detalhes do parceiro '{nome}': {e}")
+                print(f"[ERROR] Erro ao extrair 'knowmore' para o parceiro '{nome}': {e}")
                 detalhes = {
                     "regra": None,
                     "regulamento_doc": None,
@@ -343,158 +346,153 @@ def extrair_parceiros(connection):
         driver.quit()
         return parceiros
 
-    except Exception as e:
-        print(f"[ERROR] Erro durante a extração de parceiros: {e}")
-        driver.quit()
-        return []
-
-def calcular_moda(pontuacoes):
-    """
-    Calcula a moda de uma lista de pontuações.
-
-    Args:
-        pontuacoes (list of float): Lista de pontuações.
-
-    Returns:
-        float: Moda da lista. Se houver múltiplas modas, retorna a maior.
-    """
-    if not pontuacoes:
-        return 0
-
-    contador = Counter(pontuacoes)
-    max_freq = max(contador.values())
-    modas = [pont for pont, freq in contador.items() if freq == max_freq]
-    return max(modas)  # Retorna a maior moda se houver múltiplas
-
-def calcular_label_pontuacao(pontuacoes):
-    """
-    Calcula a label de pontuação com base nas pontuações históricas.
-
-    Args:
-        pontuacoes (list of float): Lista de pontuações do parceiro.
-
-    Returns:
-        str: Label da pontuação.
-    """
-    if not pontuacoes:
-        return "Sem Dados"
-
-    # Calculando as métricas necessárias
-    min_val = min(pontuacoes)
-    max_val = max(pontuacoes)
-    mode_val = calcular_moda(pontuacoes)  # Função para calcular a moda
-    last_val = pontuacoes[-1]  # Última pontuação inserida
-
-    # Definindo os thresholds
-    excellent_threshold = mode_val * 2
-    good_threshold = mode_val
-    poor_threshold = mode_val / 2
-
-    # Definindo as labels
-    if max_val <= 0 or min_val == max_val:
-        return "Pontuação Normal"
-
-    if last_val > excellent_threshold:
-        return "Ótima Pontuação"
-    elif good_threshold < last_val <= excellent_threshold:
-        return "Boa Pontuação"
-    elif last_val == mode_val:
-        return "Pontuação Normal"
-    elif poor_threshold <= last_val < good_threshold:
-        return "Pouco Abaixo do Normal"
-    else:
-        return "Má Pontuação"
-
-def salvar_relatorio_mysql(parceiros, connection):
-    """
-    Insere os dados de pontuação no banco de dados MySQL.
-    Relaciona com a empresa e inclui a descrição.
-    Atualiza a label_pontuacao na tabela de empresas.
-    Atualiza os novos campos: regra, regulamento_doc e sobre.
-
-    Args:
-        parceiros (list of dict): Lista de parceiros com suas pontuações.
-        connection: Objeto de conexão MySQL.
-    """
-    if not parceiros:
-        print("[WARN] Lista de parceiros vazia; não há o que salvar.")
-        return
-
-    # Lê apenas da variável de ambiente (sem fallback)
-    table_pontuacao = get_env_var("TABLE_PONTUACAO_LIV")
-    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
-
-    try:
-        cursor = connection.cursor()
-        insert_query = f"""
-            INSERT INTO {table_pontuacao} (
-                data_hora_coleta, moeda, pontuacao, pontuacao_clube_livelo, empresa_id, descricao_text, regra, regulamento_doc
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    def calcular_moda(pontuacoes):
         """
+        Calcula a moda de uma lista de pontuações.
 
-        for parceiro in parceiros:
-            data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute(insert_query, (
-                data_hora_coleta,
-                parceiro["moeda"],
-                parceiro["pontuacao"],
-                parceiro["pontuacao_clube_livelo"],
-                parceiro["empresa_id"],
-                parceiro["descricao_text"],
-                parceiro["regra"],
-                parceiro["regulamento_doc"]
-            ))
+        Args:
+            pontuacoes (list of float): Lista de pontuações.
 
-        connection.commit()
-        print("[INFO] Dados inseridos no banco de dados com sucesso.")
+        Returns:
+            float: Moda da lista. Se houver múltiplas modas, retorna a maior.
+        """
+        if not pontuacoes:
+            return 0
 
-        # Após inserir, atualizar a label_pontuacao e 'sobre' para cada parceiro
-        for parceiro in parceiros:
-            empresa_id = parceiro["empresa_id"]
+        contador = Counter(pontuacoes)
+        max_freq = max(contador.values())
+        modas = [pont for pont, freq in contador.items() if freq == max_freq]
+        return max(modas)  # Retorna a maior moda se houver múltiplas
 
-            # Recuperar todas as pontuações do parceiro
-            cursor.execute(f"""
-                SELECT pontuacao FROM {table_pontuacao}
-                WHERE empresa_id = %s ORDER BY data_hora_coleta ASC
-            """, (empresa_id,))
-            resultados = cursor.fetchall()
-            pontuacoes = [row[0] for row in resultados]
+    def calcular_label_pontuacao(pontuacoes):
+        """
+        Calcula a label de pontuação com base nas pontuações históricas.
 
-            # Calcular a label
-            label = calcular_label_pontuacao(pontuacoes)
+        Args:
+            pontuacoes (list of float): Lista de pontuações do parceiro.
 
-            # Atualizar a tabela de empresas
-            cursor.execute(f"""
-                UPDATE {table_empresas}
-                SET label_pontuacao = %s
-                WHERE id = %s
-            """, (label, empresa_id))
-            print(f"[INFO] label_pontuacao atualizado para a empresa ID {empresa_id}: {label}")
+        Returns:
+            str: Label da pontuação.
+        """
+        if not pontuacoes:
+            return "Sem Dados"
 
-            # Atualizar o campo 'sobre' se estiver disponível e ainda não tiver sido atualizado
-            sobre = parceiro.get("sobre")
-            if sobre:
+        # Calculando as métricas necessárias
+        min_val = min(pontuacoes)
+        max_val = max(pontuacoes)
+        mode_val = calcular_moda(pontuacoes)  # Função para calcular a moda
+        last_val = pontuacoes[-1]  # Última pontuação inserida
+
+        # Definindo os thresholds
+        excellent_threshold = mode_val * 2
+        good_threshold = mode_val
+        poor_threshold = mode_val / 2
+
+        # Definindo as labels
+        if max_val <= 0 or min_val == max_val:
+            return "Pontuação Normal"
+
+        if last_val > excellent_threshold:
+            return "Ótima Pontuação"
+        elif good_threshold < last_val <= excellent_threshold:
+            return "Boa Pontuação"
+        elif last_val == mode_val:
+            return "Pontuação Normal"
+        elif poor_threshold <= last_val < good_threshold:
+            return "Pouco Abaixo do Normal"
+        else:
+            return "Má Pontuação"
+
+    def salvar_relatorio_mysql(parceiros, connection):
+        """
+        Insere os dados de pontuação no banco de dados MySQL.
+        Relaciona com a empresa e inclui a descrição.
+        Atualiza a label_pontuacao na tabela de empresas.
+        Atualiza os novos campos: regra, regulamento_doc e sobre.
+
+        Args:
+            parceiros (list of dict): Lista de parceiros com suas pontuações.
+            connection: Objeto de conexão MySQL.
+        """
+        if not parceiros:
+            print("[WARN] Lista de parceiros vazia; não há o que salvar.")
+            return
+
+        # Lê apenas da variável de ambiente (sem fallback)
+        table_pontuacao = get_env_var("TABLE_PONTUACAO_LIV")
+        table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
+
+        try:
+            cursor = connection.cursor()
+            insert_query = f"""
+                INSERT INTO {table_pontuacao} (
+                    data_hora_coleta, moeda, pontuacao, pontuacao_clube_livelo, empresa_id, descricao_text, regra, regulamento_doc
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            for parceiro in parceiros:
+                data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute(insert_query, (
+                    data_hora_coleta,
+                    parceiro["moeda"],
+                    parceiro["pontuacao"],
+                    parceiro["pontuacao_clube_livelo"],
+                    parceiro["empresa_id"],
+                    parceiro["descricao_text"],
+                    parceiro["regra"],
+                    parceiro["regulamento_doc"]
+                ))
+
+            connection.commit()
+            print("[INFO] Dados inseridos no banco de dados com sucesso.")
+
+            # Após inserir, atualizar a label_pontuacao e 'sobre' para cada parceiro
+            for parceiro in parceiros:
+                empresa_id = parceiro["empresa_id"]
+
+                # Recuperar todas as pontuações do parceiro
                 cursor.execute(f"""
-                    SELECT sobre FROM {table_empresas}
-                    WHERE id = %s
+                    SELECT pontuacao FROM {table_pontuacao}
+                    WHERE empresa_id = %s ORDER BY data_hora_coleta ASC
                 """, (empresa_id,))
-                current_sobre = cursor.fetchone()[0]
-                if not current_sobre:
-                    cursor.execute(f"""
-                        UPDATE {table_empresas}
-                        SET sobre = %s
-                        WHERE id = %s
-                    """, (sobre, empresa_id))
-                    print(f"[INFO] Campo 'sobre' atualizado para a empresa ID {empresa_id}.")
-                else:
-                    print(f"[INFO] Campo 'sobre' já está preenchido para a empresa ID {empresa_id}.")
-            else:
-                print(f"[INFO] Nenhuma informação 'sobre' para atualizar para a empresa ID {empresa_id}.")
+                resultados = cursor.fetchall()
+                pontuacoes = [row[0] for row in resultados]
 
-        connection.commit()
-        print("[INFO] Labels de pontuação e descrições atualizadas com sucesso.")
-    except mysql.connector.Error as err:
-        print(f"[ERROR] Erro ao inserir dados no banco de dados: {err}")
+                # Calcular a label
+                label = calcular_label_pontuacao(pontuacoes)
+
+                # Atualizar a tabela de empresas
+                cursor.execute(f"""
+                    UPDATE {table_empresas}
+                    SET label_pontuacao = %s
+                    WHERE id = %s
+                """, (label, empresa_id))
+                print(f"[INFO] label_pontuacao atualizado para a empresa ID {empresa_id}: {label}")
+
+                # Atualizar o campo 'sobre' se estiver disponível e ainda não tiver sido atualizado
+                sobre = parceiro.get("sobre")
+                if sobre:
+                    cursor.execute(f"""
+                        SELECT sobre FROM {table_empresas}
+                        WHERE id = %s
+                    """, (empresa_id,))
+                    current_sobre = cursor.fetchone()[0]
+                    if not current_sobre:
+                        cursor.execute(f"""
+                            UPDATE {table_empresas}
+                            SET sobre = %s
+                            WHERE id = %s
+                        """, (sobre, empresa_id))
+                        print(f"[INFO] Campo 'sobre' atualizado para a empresa ID {empresa_id}.")
+                    else:
+                        print(f"[INFO] Campo 'sobre' já está preenchido para a empresa ID {empresa_id}.")
+                else:
+                    print(f"[INFO] Nenhuma informação 'sobre' para atualizar para a empresa ID {empresa_id}.")
+
+            connection.commit()
+            print("[INFO] Labels de pontuação e descrições atualizadas com sucesso.")
+        except mysql.connector.Error as err:
+            print(f"[ERROR] Erro ao inserir dados no banco de dados: {err}")
 
 def main():
     connection = conectar_banco()
