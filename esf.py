@@ -3,17 +3,12 @@ import mysql.connector
 import re
 import time
 from datetime import datetime
-from collections import Counter
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from dotenv import load_dotenv
-
-# Carregar variáveis de ambiente do arquivo .env
-load_dotenv()
 
 def get_env_var(var_name: str) -> str:
     """
@@ -31,10 +26,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host=get_env_var("DB_HOST"),        # Host do banco de dados
-            database=get_env_var("DB_NAME"),    # Nome do banco de dados
-            user=get_env_var("DB_USER"),        # Usuário do banco de dados
-            password=get_env_var("DB_PASSWORD") # Senha do banco de dados
+            host=os.getenv("DB_HOST"),        # Host do banco de dados
+            database=os.getenv("DB_NAME"),    # Nome do banco de dados
+            user=os.getenv("DB_USER"),        # Usuário do banco de dados
+            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -235,7 +230,7 @@ def extrair_parceiros(connection):
 
 def calcular_moda(pontuacoes):
     """
-    Calcula a moda de uma lista de pontuações.
+    Calcula a moda de uma lista de pontuações manualmente.
 
     Args:
         pontuacoes (list of float): Lista de pontuações.
@@ -246,9 +241,16 @@ def calcular_moda(pontuacoes):
     if not pontuacoes:
         return 0
 
-    contador = Counter(pontuacoes)
-    max_freq = max(contador.values())
-    modas = [pont for pont, freq in contador.items() if freq == max_freq]
+    frequencias = {}
+    for pontuacao in pontuacoes:
+        if pontuacao in frequencias:
+            frequencias[pontuacao] += 1
+        else:
+            frequencias[pontuacao] = 1
+
+    max_freq = max(frequencias.values())
+    modas = [pont for pont, freq in frequencias.items() if freq == max_freq]
+
     return max(modas)  # Retorna a maior moda se houver múltiplas
 
 def calcular_label_pontuacao(pontuacoes):
@@ -320,7 +322,7 @@ def salvar_relatorio_mysql(parceiros, connection):
             data_hora_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             # Converter pontuacao para float se possível
             try:
-                pontuacao_float = float(parceiro["pontuacao"])
+                pontuacao_float = float(parceiro["pontuacao"].replace(',', '.'))
             except ValueError:
                 pontuacao_float = 0.0  # Ou outra lógica de tratamento
             cursor.execute(insert_query, (
