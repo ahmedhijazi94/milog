@@ -1,19 +1,14 @@
 import os
 import mysql.connector
-import re
 import time
-from datetime import datetime
-from collections import Counter
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
-    ElementNotInteractableException,
     NoSuchElementException,
     TimeoutException,
 )
@@ -34,10 +29,10 @@ def conectar_banco():
     """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),        # Host do banco de dados
-            database=os.getenv("DB_NAME"),    # Nome do banco de dados
-            user=os.getenv("DB_USER"),        # Usuário do banco de dados
-            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
+            host=get_env_var("DB_HOST"),        # Host do banco de dados
+            database=get_env_var("DB_NAME"),    # Nome do banco de dados
+            user=get_env_var("DB_USER"),        # Usuário do banco de dados
+            password=get_env_var("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -130,6 +125,7 @@ def extrair_links_regra(connection):
     url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
 
     chrome_options = Options()
+    # Para depuração, execute o navegador com interface gráfica. Comente a linha abaixo.
     chrome_options.add_argument("--headless")  # Executa o Chrome em modo headless
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
@@ -322,6 +318,8 @@ def extrair_links_regra(connection):
                 print("[INFO] Voltando para a página principal após erro.")
             except Exception as e_inner:
                 print(f"[ERROR] Erro ao tentar voltar para a página principal: {e_inner}")
+                # Captura de tela para depuração
+                driver.save_screenshot(f"screenshot_error_back_{nome}.png")
                 break  # Encerrar o loop se não for possível retornar
 
     driver.quit()
