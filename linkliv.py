@@ -36,43 +36,99 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
-def obter_primeira_link_update_date(connection, table_empresas):
+def garantir_colunas(connection, table_empresas):
     cursor = connection.cursor()
     try:
-        cursor.execute(f"SELECT link_update_date FROM {table_empresas} ORDER BY id ASC LIMIT 1")
-        resultado = cursor.fetchone()
-        if resultado:
-            return resultado[0]  # Pode ser None ou datetime
+        # Garantir coluna 'link'
+        cursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = 'link';
+        """, (os.getenv("DB_NAME"), table_empresas))
+        result = cursor.fetchone()
+        if not result:
+            try:
+                cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link VARCHAR(2083);")
+                connection.commit()
+                print(f"[INFO] Coluna 'link' adicionada à tabela '{table_empresas}'.")
+            except mysql.connector.Error as err:
+                print(f"[ERROR] Não foi possível adicionar a coluna 'link': {err}")
+
+        # Garantir coluna 'link_update_date'
+        cursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = 'link_update_date';
+        """, (os.getenv("DB_NAME"), table_empresas))
+        result = cursor.fetchone()
+        if not result:
+            try:
+                cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link_update_date DATE;")
+                connection.commit()
+                print(f"[INFO] Coluna 'link_update_date' adicionada à tabela '{table_empresas}'.")
+            except mysql.connector.Error as err:
+                print(f"[ERROR] Não foi possível adicionar a coluna 'link_update_date': {err}")
         else:
-            print(f"[WARN] Não há registros na tabela '{table_empresas}'.")
-            return None
+            print(f"[INFO] A tabela '{table_empresas}' já possui a coluna 'link_update_date'.")
     finally:
         cursor.close()
 
-def deve_executar(link_update_date, meses=1):
-    if not link_update_date:
-        return True
+def verificar_atualizacao(connection, table_empresas) -> bool:
+    cursor = connection.cursor()
     try:
-        ultima_atualizacao = link_update_date
-        if isinstance(ultima_atualizacao, str):
-            ultima_atualizacao = datetime.strptime(ultima_atualizacao, "%Y-%m-%d %H:%M:%S")
-    except Exception as e:
-        print(f"[WARN] Formato inesperado para link_update_date: {e}")
-        return True
-    agora = datetime.now()
-    delta = agora - ultima_atualizacao
-    return delta >= timedelta(days=30 * meses)
+        cursor.execute(f"SELECT link_update_date FROM {table_empresas} ORDER BY id LIMIT 1;")
+        resultado = cursor.fetchone()
+        if resultado:
+            link_update_date = resultado[0]
+            if link_update_date:
+                data_atual = datetime.now().date()
+                data_limite = data_atual - timedelta(days=30)
+                if link_update_date >= data_limite:
+                    print("[INFO] Links já foram atualizados há menos de um mês. Finalizando o bot.")
+                    return False
+                else:
+                    print("[INFO] A data de atualização dos links é maior que um mês. Executando o bot.")
+                    return True
+            else:
+                print("[INFO] 'link_update_date' está vazio. Executando o bot.")
+                return True
+        else:
+            print("[WARN] Nenhuma linha encontrada na tabela. Executando o bot.")
+            return True
+    except mysql.connector.Error as err:
+        print(f"[ERROR] Erro ao verificar a data de atualização: {err}")
+        return False
+    finally:
+        cursor.close()
+
+def conectar_selenium():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")  # Atualizado para headless novo se disponível
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    )
+
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_window_size(1920, 1080)
+        return driver
+    except WebDriverException as e:
+        print(f"[ERROR] Não foi possível iniciar o WebDriver do Selenium: {e}")
+        return None
 
 def obter_empresa_id(nome_empresa, connection, table_empresas):
     cursor = connection.cursor()
     try:
-        cursor.execute(f"SELECT id, link FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
+        cursor.execute(f"SELECT id FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
         empresa = cursor.fetchone()
         if empresa:
-            return empresa[0], empresa[1]  # Retorna id e link atual
+            return empresa[0]
         else:
             print(f"[WARN] Empresa '{nome_empresa}' não encontrada na tabela.")
-            return None, None
+            return None
     finally:
         cursor.close()
 
@@ -85,9 +141,10 @@ def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
 
         if link_atual != link_novo:
             try:
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute(f"UPDATE {table_empresas} SET link = %s, link_update_date = %s WHERE id = %s", 
-                               (link_novo, current_time, empresa_id))
+                cursor.execute(
+                    f"UPDATE {table_empresas} SET link = %s, link_update_date = %s WHERE id = %s",
+                    (link_novo, datetime.now().date(), empresa_id)
+                )
                 connection.commit()
                 print(f"[INFO] Link atualizado para a empresa ID {empresa_id}: {link_novo}")
             except mysql.connector.Error as err:
@@ -96,30 +153,6 @@ def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
             print(f"[INFO] Link para a empresa ID {empresa_id} já está atualizado.")
     finally:
         cursor.close()
-
-def extrair_link_sem_clicar(driver, botao_know_more):
-    """
-    Tenta extrair o link 'knowmore' diretamente dos atributos ou do 'data-bind'.
-    Retorna o link se encontrado, caso contrário, retorna None.
-    """
-    try:
-        # Extrai o valor do atributo 'href', se presente
-        href = botao_know_more.get_attribute('href')
-        if href and href.strip():
-            return href.strip()
-        
-        # Caso o 'href' não esteja definido, tenta extrair do 'data-bind'
-        data_bind = botao_know_more.get_attribute('data-bind')
-        if data_bind:
-            # Usa regex para extrair o valor de 'knowmore' dentro do 'data-bind'
-            match = re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", data_bind)
-            if match:
-                return match.group(1).strip()
-        
-        return None
-    except Exception as e:
-        print(f"[WARN] Não foi possível extrair o link sem clicar: {e}")
-        return None
 
 def fechar_notificacoes(driver):
     """
@@ -152,9 +185,6 @@ def processar_cards(driver, connection, table_empresas):
                     EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
                 )
                 cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
-                if i >= len(cards):
-                    print(f"[WARN] Número de cards mudou. Total atual: {len(cards)}. Pulando índice {i}.")
-                    continue
                 card = cards[i]
 
                 # Extrair o nome da empresa
@@ -166,11 +196,8 @@ def processar_cards(driver, connection, table_empresas):
                     print("[WARN] Nome da empresa não encontrado no card.")
                     continue
 
-                # Obter o ID e link atual da empresa
-                empresa_id, link_atual_db = obter_empresa_id(nome_empresa, connection, table_empresas)
-                if empresa_id is None:
-                    print(f"[WARN] Não foi possível obter ID para a empresa '{nome_empresa}'.")
-                    continue
+                # Fechar notificações que possam estar interferindo
+                fechar_notificacoes(driver)
 
                 # Encontrar o botão 'Ir para regras do parceiro'
                 try:
@@ -179,30 +206,13 @@ def processar_cards(driver, connection, table_empresas):
                     print("[WARN] Botão 'Ir para regras do parceiro' não encontrado.")
                     continue
 
-                # Tentar extrair o link sem clicar
-                link_extraido = extrair_link_sem_clicar(driver, botao_know_more)
-                if link_extraido:
-                    print(f"[INFO] Link extraído sem clicar: {link_extraido}")
-                    # Verificar se o link está vazio ou diferente do banco
-                    if not link_atual_db or link_atual_db != link_extraido:
-                        print(f"[INFO] Link está vazio ou diferente. Atualizando no banco.")
-                        atualizar_link_no_banco(connection, table_empresas, empresa_id, link_extraido)
-                    else:
-                        print(f"[INFO] Link para a empresa '{nome_empresa}' já está atualizado.")
-                    continue  # Pula o clique, pois já extraiu o link
-                else:
-                    print(f"[INFO] Link não pôde ser extrato sem clicar. Processando o card.")
-
-                # Fechar notificações que possam estar interferindo
-                fechar_notificacoes(driver)
-
                 # Scroll até o botão para garantir que está visível
                 driver.execute_script("arguments[0].scrollIntoView(true);", botao_know_more)
                 time.sleep(1)  # Pausa para garantir o scroll
 
                 # Esperar que o botão esteja clicável
                 try:
-                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(botao_know_more))
+                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.button__knowmore--link.gtm-link-event")))
                 except TimeoutException:
                     print(f"[WARN] Botão 'Ir para regras do parceiro' não está clicável para a empresa '{nome_empresa}'.")
                     continue
@@ -233,7 +243,9 @@ def processar_cards(driver, connection, table_empresas):
                     continue
 
                 # Atualizar o banco de dados
-                atualizar_link_no_banco(connection, table_empresas, empresa_id, url_atual)
+                empresa_id = obter_empresa_id(nome_empresa, connection, table_empresas)
+                if empresa_id:
+                    atualizar_link_no_banco(connection, table_empresas, empresa_id, url_atual)
 
                 # Navegar de volta para a página principal
                 driver.back()
@@ -259,23 +271,26 @@ def processar_cards(driver, connection, table_empresas):
                 print(f"[ERROR] Ocorreu um erro inesperado: {e}")
                 continue
 
-    def main():
-        # Conectar ao banco de dados
-        connection = conectar_banco()
-        if not connection:
-            return
+    except Exception as e:
+        print(f"[ERROR] Erro durante o processamento dos cards: {e}")
 
+def main():
+    # Conectar ao banco de dados
+    connection = conectar_banco()
+    if not connection:
+        return
+
+    try:
         # Obter o nome da tabela de empresas
         table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
 
-        # Verificar a data da última atualização
-        link_update_date = obter_primeira_link_update_date(connection, table_empresas)
-        if not deve_executar(link_update_date):
-            print("[INFO] Links estão atualizados. Nenhuma ação necessária.")
+        # Garantir que a tabela possui os campos 'link' e 'link_update_date'
+        garantir_colunas(connection, table_empresas)
+
+        # Verificar se é necessário executar o bot
+        if not verificar_atualizacao(connection, table_empresas):
             connection.close()
             return
-        else:
-            print("[INFO] Iniciando atualização dos links.")
 
         # Configurar o Selenium
         driver = conectar_selenium()
@@ -319,5 +334,9 @@ def processar_cards(driver, connection, table_empresas):
             connection.close()
             print("[INFO] Bot finalizado com sucesso.")
 
-    if __name__ == "__main__":
-        main()
+    except Exception as e:
+        print(f"[ERROR] Ocorreu um erro no processo principal: {e}")
+        connection.close()
+
+if __name__ == "__main__":
+    main()
