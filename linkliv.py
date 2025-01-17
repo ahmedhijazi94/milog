@@ -19,25 +19,18 @@ from selenium.common.exceptions import (
 )
 
 def get_env_var(var_name: str) -> str:
-    """
-    Lê a variável de ambiente 'var_name'.
-    Se não estiver definida, gera um erro (ValueError).
-    """
     value = os.getenv(var_name)
     if not value:
         raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
     return value
 
 def conectar_banco():
-    """
-    Conecta ao banco de dados MySQL e retorna o objeto de conexão.
-    """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),        # Host do banco de dados
-            database=os.getenv("DB_NAME"),    # Nome do banco de dados
-            user=os.getenv("DB_USER"),        # Usuário do banco de dados
-            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
+            host=os.getenv("DB_HOST"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD")
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -47,17 +40,12 @@ def conectar_banco():
         return None
 
 def criar_tabela_link(connection):
-    """
-    Adiciona a coluna 'link' na tabela de empresas, caso não exista.
-    """
     table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
     try:
         cursor = connection.cursor()
-        # Verifica se a coluna 'link' já existe
         cursor.execute(f"SHOW COLUMNS FROM {table_empresas} LIKE 'link'")
         result = cursor.fetchone()
         if not result:
-            # Adiciona a coluna 'link'
             alter_table_query = f"""
             ALTER TABLE {table_empresas}
             ADD COLUMN link VARCHAR(500) DEFAULT NULL
@@ -71,18 +59,12 @@ def criar_tabela_link(connection):
         print(f"[ERROR] Não foi possível alterar a tabela: {err}")
 
 def obter_empresa_por_nome(nome_empresa, connection):
-    """
-    Recupera a empresa pelo nome.
-    """
     table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
     cursor = connection.cursor()
     cursor.execute(f"SELECT id, link FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     return cursor.fetchone()
 
 def atualizar_link_empresa(empresa_id, novo_link, connection):
-    """
-    Atualiza o campo 'link' da empresa se o link for diferente.
-    """
     table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
     cursor = connection.cursor()
     cursor.execute(f"SELECT link FROM {table_empresas} WHERE id = %s", (empresa_id,))
@@ -97,17 +79,10 @@ def atualizar_link_empresa(empresa_id, novo_link, connection):
         print(f"[INFO] Link para a empresa ID {empresa_id} não mudou.")
 
 def fechar_sobreposicoes(driver):
-    """
-    Tenta fechar quaisquer sobreposições que possam estar bloqueando cliques.
-    """
     try:
-        # Exemplo: fechar um banner de notificação
-        # Ajuste os seletores conforme necessário
         sobreposicoes = [
-            # Se houver um botão de fechar para notificações
-            {"by": By.CSS_SELECTOR, "button.close-notification"},
-            # Se houver um banner de cookies que ainda não foi fechado
-            {"by": By.ID, "onetrust-accept-btn-handler"},
+            {"by": By.CSS_SELECTOR, "value": "button.close-notification"},
+            {"by": By.ID, "value": "onetrust-accept-btn-handler"},
             {"by": By.CSS_SELECTOR, "div.notifi__container"},
             # Adicione outros seletores conforme necessário
         ]
@@ -124,9 +99,6 @@ def fechar_sobreposicoes(driver):
         print(f"[WARN] Erro ao tentar fechar sobreposições: {e}")
 
 def extrair_links_regra(connection):
-    """
-    Percorre todos os cards de parceiros, extrai o link das regras e atualiza no banco de dados.
-    """
     url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
 
     chrome_options = Options()
