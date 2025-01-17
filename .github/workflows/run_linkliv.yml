@@ -1,0 +1,38 @@
+# .github/workflows/run_linkliv.yml
+
+name: Run Bot linkliv
+
+on:
+  schedule:
+    - cron: '0 15 1 */2 *'  # Executa no dia 1 de cada 2 meses às 15h UTC
+  push:
+    branches:
+      - main
+
+jobs:
+  run_linkliv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mysql-connector-python beautifulsoup4 requests pandas lxml selenium
+
+      - name: Run Bot linkliv
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
+          TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
+        run: python linkliv.py
