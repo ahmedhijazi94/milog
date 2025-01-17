@@ -88,7 +88,22 @@ def verificar_atualizacao(connection, table_empresas) -> bool:
             if link_update_date is None:
                 print(f"[INFO] Linha ID {idx} possui 'link_update_date' vazio.")
                 return True
-            elif link_update_date < data_limite:
+            # Verificar se link_update_date é string e convertê-la para datetime.date
+            if isinstance(link_update_date, str):
+                try:
+                    link_update_date = datetime.strptime(link_update_date, '%Y-%m-%d').date()
+                except ValueError as e:
+                    print(f"[ERROR] Erro ao analisar a data na linha {idx}: {e}")
+                    return True  # Tratar erro de análise como necessidade de atualização
+            elif isinstance(link_update_date, datetime):
+                link_update_date = link_update_date.date()
+            elif isinstance(link_update_date, date):
+                pass  # Já é um objeto date
+            else:
+                print(f"[WARN] Tipo desconhecido para 'link_update_date' na linha {idx}: {type(link_update_date)}")
+                return True  # Tratar tipos desconhecidos como necessidade de atualização
+
+            if link_update_date < data_limite:
                 print(f"[INFO] Linha ID {idx} possui 'link_update_date' anterior a um mês.")
                 return True
         print("[INFO] Todas as linhas possuem 'link_update_date' atualizados há menos de um mês. Finalizando o bot.")
