@@ -15,28 +15,19 @@ from selenium.common.exceptions import (
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-
 def get_env_var(var_name: str) -> str:
-    """
-    Lê a variável de ambiente 'var_name'.
-    Se não estiver definida, gera um erro (ValueError).
-    """
     value = os.getenv(var_name)
     if not value:
         raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
     return value
 
-
 def conectar_banco():
-    """
-    Conecta ao banco de dados MySQL e retorna o objeto de conexão.
-    """
     try:
         connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),        # Host do banco de dados
-            database=os.getenv("DB_NAME"),    # Nome do banco de dados
-            user=os.getenv("DB_USER"),        # Usuário do banco de dados
-            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
+            host=os.getenv("DB_HOST"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD")
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -45,11 +36,7 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
-
 def garantir_campo_link(connection, table_empresas):
-    """
-    Verifica se a tabela possui o campo 'link'. Se não, adiciona-o.
-    """
     cursor = connection.cursor()
     try:
         cursor.execute("""
@@ -70,13 +57,9 @@ def garantir_campo_link(connection, table_empresas):
     finally:
         cursor.close()
 
-
 def conectar_selenium():
-    """
-    Configura e retorna uma instância do WebDriver do Selenium.
-    """
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")  # Atualizado para headless novo se disponível
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument(
@@ -92,11 +75,7 @@ def conectar_selenium():
         print(f"[ERROR] Não foi possível iniciar o WebDriver do Selenium: {e}")
         return None
 
-
 def obter_empresa_id(nome_empresa, connection, table_empresas):
-    """
-    Recupera o ID da empresa pelo nome. Assume que o bot atual já populou a tabela.
-    """
     cursor = connection.cursor()
     try:
         cursor.execute(f"SELECT id FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
@@ -109,11 +88,7 @@ def obter_empresa_id(nome_empresa, connection, table_empresas):
     finally:
         cursor.close()
 
-
 def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
-    """
-    Atualiza o campo 'link' para a empresa especificada se for diferente.
-    """
     cursor = connection.cursor()
     try:
         cursor.execute(f"SELECT link FROM {table_empresas} WHERE id = %s", (empresa_id,))
@@ -132,11 +107,25 @@ def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
     finally:
         cursor.close()
 
+def fechar_notificacoes(driver):
+    """
+    Tenta fechar quaisquer notificações ou elementos que possam estar interceptando cliques.
+    """
+    try:
+        # Exemplo: Fechar notificações com base em classes ou IDs conhecidos
+        notificacoes = driver.find_elements(By.CSS_SELECTOR, "div.notifi__column.notifi__column--action")
+        for notificacao in notificacoes:
+            try:
+                fechar_botao = notificacao.find_element(By.CSS_SELECTOR, "button.close")  # Atualize o seletor conforme necessário
+                fechar_botao.click()
+                print("[INFO] Notificação fechada.")
+                time.sleep(1)  # Pausa para garantir que a notificação foi fechada
+            except NoSuchElementException:
+                continue
+    except Exception as e:
+        print(f"[WARN] Não foi possível fechar notificações: {e}")
 
 def processar_cards(driver, connection, table_empresas):
-    """
-    Itera sobre cada card, clica no botão 'Ir para regras do parceiro', obtém a URL e atualiza o banco.
-    """
     try:
         cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
         num_cards = len(cards)
@@ -145,9 +134,10 @@ def processar_cards(driver, connection, table_empresas):
         for i in range(num_cards):
             try:
                 # Re-encontrar os cards para evitar StaleElementReferenceException
-                cards = WebDriverWait(driver, 10).until(
+                WebDriverWait(driver, 10).until(
                     EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
                 )
+                cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
                 card = cards[i]
 
                 # Extrair o nome da empresa
@@ -159,11 +149,25 @@ def processar_cards(driver, connection, table_empresas):
                     print("[WARN] Nome da empresa não encontrado no card.")
                     continue
 
+                # Fechar notificações que possam estar interferindo
+                fechar_notificacoes(driver)
+
                 # Encontrar o botão 'Ir para regras do parceiro'
                 try:
                     botao_know_more = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link.gtm-link-event")
                 except NoSuchElementException:
                     print("[WARN] Botão 'Ir para regras do parceiro' não encontrado.")
+                    continue
+
+                # Scroll até o botão para garantir que está visível
+                driver.execute_script("arguments[0].scrollIntoView(true);", botao_know_more)
+                time.sleep(1)  # Pausa para garantir o scroll
+
+                # Esperar que o botão esteja clicável
+                try:
+                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.button__knowmore--link.gtm-link-event")))
+                except TimeoutException:
+                    print(f"[WARN] Botão 'Ir para regras do parceiro' não está clicável para a empresa '{nome_empresa}'.")
                     continue
 
                 # Simular o clique no botão
@@ -172,7 +176,13 @@ def processar_cards(driver, connection, table_empresas):
                     print(f"[INFO] Clicado no botão 'Ir para regras do parceiro' para a empresa '{nome_empresa}'.")
                 except (ElementClickInterceptedException, StaleElementReferenceException) as e:
                     print(f"[ERROR] Não foi possível clicar no botão para a empresa '{nome_empresa}': {e}")
-                    continue
+                    # Tentar clicar via JavaScript como fallback
+                    try:
+                        driver.execute_script("arguments[0].click();", botao_know_more)
+                        print(f"[INFO] Clicado no botão via JavaScript para a empresa '{nome_empresa}'.")
+                    except Exception as js_e:
+                        print(f"[ERROR] Falha ao clicar no botão via JavaScript para a empresa '{nome_empresa}': {js_e}")
+                        continue
 
                 # Esperar a nova página carregar
                 try:
@@ -216,7 +226,6 @@ def processar_cards(driver, connection, table_empresas):
 
     except Exception as e:
         print(f"[ERROR] Erro durante o processamento dos cards: {e}")
-
 
 def main():
     # Conectar ao banco de dados
@@ -271,7 +280,6 @@ def main():
         driver.quit()
         connection.close()
         print("[INFO] Bot finalizado com sucesso.")
-
 
 if __name__ == "__main__":
     main()
