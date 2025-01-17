@@ -153,14 +153,40 @@ def processar_cards_esf(driver, connection, table_empresas):
                 try:
                     link_element = card.find_element(By.TAG_NAME, "a")
                     link_relativo = link_element.get_attribute("href")
-                    if not link_relativo.startswith("http"):
-                        # Se o link for relativo, construí-lo com a base da URL
-                        link_novo = f"https://www.esfera.com.vc{link_relativo}"
+                    
+                    if link_relativo:
+                        if not link_relativo.startswith("http"):
+                            # Se o link for relativo, construí-lo com a base da URL
+                            link_novo = f"https://www.esfera.com.vc{link_relativo}"
+                        else:
+                            link_novo = link_relativo
+                        print(f"[INFO] Link encontrado para a empresa '{nome_empresa}': {link_novo}")
                     else:
-                        link_novo = link_relativo
-                    print(f"[INFO] Link encontrado para a empresa '{nome_empresa}': {link_novo}")
+                        # Caso o 'href' não exista, tentar clicar e obter a URL
+                        print(f"[WARN] 'href' não encontrado para a empresa '{nome_empresa}', tentando clicar para obter o link.")
+                        try:
+                            link_element.click()
+                            # Esperar a nova página carregar
+                            WebDriverWait(driver, 20).until(
+                                EC.presence_of_element_located((By.TAG_NAME, "body"))
+                            )
+                            link_novo = driver.current_url
+                            print(f"[INFO] Link obtido após clique para a empresa '{nome_empresa}': {link_novo}")
+                            # Navegar de volta para a página principal
+                            driver.back()
+                            # Esperar a página principal carregar novamente
+                            WebDriverWait(driver, 20).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "div.box-partner-custom"))
+                            )
+                        except Exception as click_e:
+                            print(f"[ERROR] Falha ao clicar para obter o link da empresa '{nome_empresa}': {click_e}")
+                            continue
+
                 except NoSuchElementException:
                     print("[WARN] Link não encontrado no card.")
+                    continue
+                except Exception as e:
+                    print(f"[ERROR] Erro ao extrair o link para a empresa '{nome_empresa}': {e}")
                     continue
 
                 # Fechar notificações que possam estar interferindo
@@ -170,8 +196,6 @@ def processar_cards_esf(driver, connection, table_empresas):
                 empresa_id = obter_empresa_id(nome_empresa, connection, table_empresas)
                 if empresa_id:
                     atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo)
-
-                # Opcional: Se precisar interagir mais com a página, implementar aqui
 
                 # Pausa para evitar sobrecarga e garantir que a página esteja estável
                 time.sleep(1)
