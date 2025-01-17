@@ -4,14 +4,19 @@ import re
 import time
 from datetime import datetime
 from collections import Counter
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+    NoSuchElementException,
+    TimeoutException,
+)
 
 def get_env_var(var_name: str) -> str:
     """
@@ -22,7 +27,6 @@ def get_env_var(var_name: str) -> str:
     if not value:
         raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
     return value
-
 
 def conectar_banco():
     """
@@ -41,7 +45,6 @@ def conectar_banco():
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
-
 
 def criar_tabela_link(connection):
     """
@@ -67,7 +70,6 @@ def criar_tabela_link(connection):
     except mysql.connector.Error as err:
         print(f"[ERROR] Não foi possível alterar a tabela: {err}")
 
-
 def obter_empresa_por_nome(nome_empresa, connection):
     """
     Recupera a empresa pelo nome.
@@ -76,7 +78,6 @@ def obter_empresa_por_nome(nome_empresa, connection):
     cursor = connection.cursor()
     cursor.execute(f"SELECT id, link FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
     return cursor.fetchone()
-
 
 def atualizar_link_empresa(empresa_id, novo_link, connection):
     """
@@ -95,6 +96,32 @@ def atualizar_link_empresa(empresa_id, novo_link, connection):
     else:
         print(f"[INFO] Link para a empresa ID {empresa_id} não mudou.")
 
+def fechar_sobreposicoes(driver):
+    """
+    Tenta fechar quaisquer sobreposições que possam estar bloqueando cliques.
+    """
+    try:
+        # Exemplo: fechar um banner de notificação
+        # Ajuste os seletores conforme necessário
+        sobreposicoes = [
+            # Se houver um botão de fechar para notificações
+            {"by": By.CSS_SELECTOR, "button.close-notification"},
+            # Se houver um banner de cookies que ainda não foi fechado
+            {"by": By.ID, "onetrust-accept-btn-handler"},
+            {"by": By.CSS_SELECTOR, "div.notifi__container"},
+            # Adicione outros seletores conforme necessário
+        ]
+        for sobreposicao in sobreposicoes:
+            try:
+                elemento = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable((sobreposicao["by"], sobreposicao["value"]))
+                )
+                elemento.click()
+                print("[INFO] Sobreposição fechada.")
+            except (NoSuchElementException, TimeoutException):
+                pass  # Se o elemento não estiver presente, continue
+    except Exception as e:
+        print(f"[WARN] Erro ao tentar fechar sobreposições: {e}")
 
 def extrair_links_regra(connection):
     """
@@ -123,7 +150,7 @@ def extrair_links_regra(connection):
             EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
         ).click()
         print("[INFO] Cookies aceitos.")
-    except:
+    except (NoSuchElementException, TimeoutException):
         print("[INFO] Nenhum pop-up de cookies encontrado.")
 
     # Espera os cards carregarem
@@ -132,7 +159,7 @@ def extrair_links_regra(connection):
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
         )
         print("[INFO] Cards encontrados.")
-    except:
+    except TimeoutException:
         print("[ERROR] Timeout ao esperar os cards.")
         driver.quit()
         return
@@ -160,22 +187,45 @@ def extrair_links_regra(connection):
         try:
             print(f"[INFO] Processando {index}/{total_cards}: {nome}")
 
-            # Encontrar novamente o card pela imagem alt (nome da empresa)
-            card = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((
-                    By.XPATH, f"//div[contains(@class, 'parity__card')]//img[@alt='{nome}']/ancestor::div[contains(@class, 'parity__card')]"
-                ))
+            # Recarregar os cards para evitar StaleElementReferenceException
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
             )
+            cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
+
+            # Encontrar o card correspondente pelo nome
+            card = None
+            for c in cards:
+                try:
+                    img = c.find_element(By.CSS_SELECTOR, "img.parity__card--img")
+                    img_nome = img.get_attribute("alt")
+                    if img_nome == nome:
+                        card = c
+                        break
+                except NoSuchElementException:
+                    continue
+
+            if not card:
+                print(f"[WARN] Card para a empresa '{nome}' não encontrado.")
+                continue
+
+            # Fechar sobreposições antes de clicar
+            fechar_sobreposicoes(driver)
 
             # Encontrar o botão "Ir para regras do parceiro" dentro do card
             try:
-                botao_regras = card.find_element(By.CSS_SELECTOR, "div.button__knowmore a.button__knowmore--link")
-            except:
+                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
+            except NoSuchElementException:
                 print(f"[WARN] Botão de regras não encontrado para a empresa '{nome}'.")
                 continue
 
-            # Clicar no botão para navegar para a página de regras
-            botao_regras.click()
+            # Tentar rolar até o botão para garantir que ele esteja visível
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", botao_regras)
+            time.sleep(0.5)  # Aguarda a rolagem
+
+            # Usar ActionChains para mover o mouse até o botão e clicar
+            actions = ActionChains(driver)
+            actions.move_to_element(botao_regras).click().perform()
 
             # Esperar a nova página carregar completamente
             WebDriverWait(driver, 20).until(
@@ -205,6 +255,56 @@ def extrair_links_regra(connection):
             # Pausar brevemente antes de processar o próximo card
             time.sleep(1)
 
+        except ElementClickInterceptedException as e:
+            print(f"[ERROR] Erro ao clicar no botão para a empresa '{nome}': {e}")
+            # Tentar fechar possíveis sobreposições novamente
+            fechar_sobreposicoes(driver)
+            # Tentar clicar via JavaScript como fallback
+            try:
+                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
+                driver.execute_script("arguments[0].click();", botao_regras)
+
+                # Esperar a nova página carregar completamente
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+
+                # Obter a URL atual da página de regras
+                url_regra = driver.current_url
+                print(f"[INFO] URL das regras para '{nome}': {url_regra}")
+
+                # Atualizar o banco de dados
+                empresa = obter_empresa_por_nome(nome, connection)
+                if empresa:
+                    empresa_id, link_atual = empresa
+                    atualizar_link_empresa(empresa_id, url_regra, connection)
+                else:
+                    print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
+
+                # Navegar de volta para a página principal
+                driver.back()
+
+                # Esperar a página principal carregar novamente
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
+                )
+
+                # Pausar brevemente antes de processar o próximo card
+                time.sleep(1)
+
+            except Exception as e_inner:
+                print(f"[ERROR] Fallback: Não foi possível clicar no botão para a empresa '{nome}': {e_inner}")
+                # Tentar navegar de volta caso algo falhe
+                try:
+                    driver.back()
+                    WebDriverWait(driver, 20).until(
+                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
+                    )
+                    print("[INFO] Voltando para a página principal após erro no fallback.")
+                except Exception as e_back:
+                    print(f"[ERROR] Erro ao tentar voltar para a página principal: {e_back}")
+                continue
+
         except Exception as e:
             print(f"[ERROR] Erro ao processar a empresa '{nome}': {e}")
             # Tentar voltar para a página principal em caso de erro
@@ -221,14 +321,12 @@ def extrair_links_regra(connection):
     driver.quit()
     print("[INFO] Extração e atualização de links concluída.")
 
-
 def main():
     connection = conectar_banco()
     if connection:
         criar_tabela_link(connection)
         extrair_links_regra(connection)
         connection.close()
-
 
 if __name__ == "__main__":
     main()
