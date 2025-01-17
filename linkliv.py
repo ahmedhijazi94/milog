@@ -139,55 +139,54 @@ def extrair_links_regra(connection):
 
     time.sleep(2)  # Pausa para garantir o carregamento
 
-    # Coleta todos os cards
+    # Coleta todos os nomes das empresas para iterar posteriormente
     cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
     total_cards = len(cards)
     print(f"[INFO] Total de cards encontrados: {total_cards}")
 
-    for index in range(total_cards):
+    # Coletar todos os nomes das empresas
+    nomes_empresas = []
+    for card in cards:
         try:
-            # Recarrega os cards para evitar StaleElementReferenceException
-            cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
-            card = cards[index]
-
-            # Extrai o nome da empresa
             img_tag = card.find_element(By.CSS_SELECTOR, "img.parity__card--img")
             nome = img_tag.get_attribute("alt") if img_tag else "Nome não encontrado"
-            print(f"[INFO] Processando {index + 1}/{total_cards}: {nome}")
+            nomes_empresas.append(nome)
+        except Exception as e:
+            print(f"[ERROR] Erro ao coletar o nome de uma empresa: {e}")
+            nomes_empresas.append("Nome não encontrado")
 
-            # Encontra o botão "Ir para regras do parceiro"
+    # Iterar sobre a lista de nomes
+    for index, nome in enumerate(nomes_empresas, start=1):
+        try:
+            print(f"[INFO] Processando {index}/{total_cards}: {nome}")
+
+            # Encontrar novamente o card pela imagem alt (nome da empresa)
+            card = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH, f"//div[contains(@class, 'parity__card')]//img[@alt='{nome}']/ancestor::div[contains(@class, 'parity__card')]"
+                ))
+            )
+
+            # Encontrar o botão "Ir para regras do parceiro" dentro do card
             try:
-                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
+                botao_regras = card.find_element(By.CSS_SELECTOR, "div.button__knowmore a.button__knowmore--link")
             except:
                 print(f"[WARN] Botão de regras não encontrado para a empresa '{nome}'.")
                 continue
 
-            # Armazena a URL da janela principal
-            main_window = driver.current_window_handle
+            # Clicar no botão para navegar para a página de regras
+            botao_regras.click()
 
-            # Abre o link em uma nova aba utilizando JavaScript
-            driver.execute_script("window.open(arguments[0].href, '_blank');", botao_regras)
-
-            # Espera a nova aba abrir
-            WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
-
-            # Obtém todas as janelas
-            janelas = driver.window_handles
-            nova_janela = [janela for janela in janelas if janela != main_window][0]
-
-            # Alterna para a nova janela
-            driver.switch_to.window(nova_janela)
-
-            # Espera a página carregar
+            # Esperar a nova página carregar completamente
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
 
-            # Obtém a URL atual (depois do redirecionamento)
+            # Obter a URL atual da página de regras
             url_regra = driver.current_url
             print(f"[INFO] URL das regras para '{nome}': {url_regra}")
 
-            # Atualiza o banco de dados
+            # Atualizar o banco de dados
             empresa = obter_empresa_por_nome(nome, connection)
             if empresa:
                 empresa_id, link_atual = empresa
@@ -195,20 +194,29 @@ def extrair_links_regra(connection):
             else:
                 print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
 
-            # Fecha a nova aba
-            driver.close()
+            # Navegar de volta para a página principal
+            driver.back()
 
-            # Retorna para a janela principal
-            driver.switch_to.window(main_window)
+            # Esperar a página principal carregar novamente
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
+            )
 
-            # Opcional: aguarda um curto período antes de processar o próximo card
+            # Pausar brevemente antes de processar o próximo card
             time.sleep(1)
 
         except Exception as e:
-            print(f"[ERROR] Erro ao processar o card {index + 1}: {e}")
-            # Garante que o driver volte para a janela principal em caso de erro
-            driver.switch_to.window(main_window)
-            continue
+            print(f"[ERROR] Erro ao processar a empresa '{nome}': {e}")
+            # Tentar voltar para a página principal em caso de erro
+            try:
+                driver.get(url)
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
+                )
+                print("[INFO] Voltando para a página principal após erro.")
+            except Exception as e_inner:
+                print(f"[ERROR] Erro ao tentar voltar para a página principal: {e_inner}")
+                break  # Encerrar o loop se não for possível retornar
 
     driver.quit()
     print("[INFO] Extração e atualização de links concluída.")
