@@ -30,7 +30,7 @@ jobs:
         pip install lxml
         pip install selenium
 
-      - name: Run Bot linkesf
+    - name: Run Bot linkesf
       env:
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_NAME: ${{ secrets.DB_NAME }}
