@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -102,7 +103,7 @@ def extrair_links_regra(connection):
     url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
 
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless")  # Executa o Chrome em modo headless
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument(
@@ -118,7 +119,7 @@ def extrair_links_regra(connection):
 
     # Tenta clicar no botão de cookies
     try:
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
         ).click()
         print("[INFO] Cookies aceitos.")
@@ -128,7 +129,7 @@ def extrair_links_regra(connection):
     # Espera os cards carregarem
     try:
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
         )
         print("[INFO] Cards encontrados.")
     except:
@@ -137,38 +138,77 @@ def extrair_links_regra(connection):
         return
 
     time.sleep(2)  # Pausa para garantir o carregamento
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    div_cards = soup.find_all("div", class_="parity__card")
-    print(f"[INFO] Total de cards encontrados: {len(div_cards)}")
 
-    for index, card in enumerate(div_cards, start=1):
+    # Coleta todos os cards
+    cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
+    total_cards = len(cards)
+    print(f"[INFO] Total de cards encontrados: {total_cards}")
+
+    for index in range(total_cards):
         try:
+            # Recarrega os cards para evitar StaleElementReferenceException
+            cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
+            card = cards[index]
+
             # Extrai o nome da empresa
-            img_tag = card.find("img", class_="parity__card--img")
-            nome = img_tag.get("alt", "Nome não encontrado") if img_tag else "Nome não encontrado"
-            print(f"[INFO] Processando {index}/{len(div_cards)}: {nome}")
+            img_tag = card.find_element(By.CSS_SELECTOR, "img.parity__card--img")
+            nome = img_tag.get_attribute("alt") if img_tag else "Nome não encontrado"
+            print(f"[INFO] Processando {index + 1}/{total_cards}: {nome}")
 
             # Encontra o botão "Ir para regras do parceiro"
-            button = card.find("a", class_="button__knowmore--link")
-            if button and button.has_attr('href'):
-                link_regras = button['href']
-                # Caso o link seja relativo, converte para absoluto
-                if not link_regras.startswith("http"):
-                    link_regras = os.path.join("https://www.livelo.com.br", link_regras)
-                print(f"[INFO] Link das regras: {link_regras}")
-
-                # Recupera a empresa no banco de dados
-                empresa = obter_empresa_por_nome(nome, connection)
-                if empresa:
-                    empresa_id, link_atual = empresa
-                    # Atualiza o link se for diferente
-                    atualizar_link_empresa(empresa_id, link_regras, connection)
-                else:
-                    print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
-            else:
+            try:
+                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
+            except:
                 print(f"[WARN] Botão de regras não encontrado para a empresa '{nome}'.")
+                continue
+
+            # Armazena a URL da janela principal
+            main_window = driver.current_window_handle
+
+            # Abre o link em uma nova aba utilizando JavaScript
+            driver.execute_script("window.open(arguments[0].href, '_blank');", botao_regras)
+
+            # Espera a nova aba abrir
+            WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
+
+            # Obtém todas as janelas
+            janelas = driver.window_handles
+            nova_janela = [janela for janela in janelas if janela != main_window][0]
+
+            # Alterna para a nova janela
+            driver.switch_to.window(nova_janela)
+
+            # Espera a página carregar
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            # Obtém a URL atual (depois do redirecionamento)
+            url_regra = driver.current_url
+            print(f"[INFO] URL das regras para '{nome}': {url_regra}")
+
+            # Atualiza o banco de dados
+            empresa = obter_empresa_por_nome(nome, connection)
+            if empresa:
+                empresa_id, link_atual = empresa
+                atualizar_link_empresa(empresa_id, url_regra, connection)
+            else:
+                print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
+
+            # Fecha a nova aba
+            driver.close()
+
+            # Retorna para a janela principal
+            driver.switch_to.window(main_window)
+
+            # Opcional: aguarda um curto período antes de processar o próximo card
+            time.sleep(1)
+
         except Exception as e:
-            print(f"[ERROR] Erro ao processar o card {index}: {e}")
+            print(f"[ERROR] Erro ao processar o card {index + 1}: {e}")
+            # Garante que o driver volte para a janela principal em caso de erro
+            driver.switch_to.window(main_window)
+            continue
 
     driver.quit()
     print("[INFO] Extração e atualização de links concluída.")
