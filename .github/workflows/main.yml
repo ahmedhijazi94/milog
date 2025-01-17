@@ -36,5 +36,8 @@ jobs:
         DB_NAME: ${{ secrets.DB_NAME }}
         DB_USER: ${{ secrets.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        TABLE_BANNERS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
+
+        # As variáveis para as tabelas do LIV
+        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
+        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
       run: python linkliv.py  # Executa o terceiro bot (Slid Liv).
