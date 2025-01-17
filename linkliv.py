@@ -1,17 +1,19 @@
 import os
 import mysql.connector
 import time
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
-    ElementClickInterceptedException,
     NoSuchElementException,
     TimeoutException,
+    ElementClickInterceptedException,
+    StaleElementReferenceException
 )
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 
 def get_env_var(var_name: str) -> str:
     """
@@ -23,16 +25,17 @@ def get_env_var(var_name: str) -> str:
         raise ValueError(f"A variável de ambiente '{var_name}' não está definida!")
     return value
 
+
 def conectar_banco():
     """
     Conecta ao banco de dados MySQL e retorna o objeto de conexão.
     """
     try:
         connection = mysql.connector.connect(
-            host=get_env_var("DB_HOST"),        # Host do banco de dados
-            database=get_env_var("DB_NAME"),    # Nome do banco de dados
-            user=get_env_var("DB_USER"),        # Usuário do banco de dados
-            password=get_env_var("DB_PASSWORD") # Senha do banco de dados
+            host=os.getenv("DB_HOST"),        # Host do banco de dados
+            database=os.getenv("DB_NAME"),    # Nome do banco de dados
+            user=os.getenv("DB_USER"),        # Usuário do banco de dados
+            password=os.getenv("DB_PASSWORD") # Senha do banco de dados
         )
         if connection.is_connected():
             print("[INFO] Conectado ao banco de dados.")
@@ -41,92 +44,36 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
-def criar_tabela_link(connection):
+
+def garantir_campo_link(connection, table_empresas):
     """
-    Adiciona a coluna 'link' na tabela de empresas, caso não exista.
+    Verifica se a tabela possui o campo 'link'. Se não, adiciona-o.
     """
-    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
-    try:
-        cursor = connection.cursor()
-        # Verifica se a coluna 'link' já existe
-        cursor.execute(f"SHOW COLUMNS FROM {table_empresas} LIKE 'link'")
-        result = cursor.fetchone()
-        if not result:
-            # Adiciona a coluna 'link'
-            alter_table_query = f"""
-            ALTER TABLE {table_empresas}
-            ADD COLUMN link VARCHAR(500) DEFAULT NULL
-            """
-            cursor.execute(alter_table_query)
+    cursor = connection.cursor()
+    cursor.execute("""
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = 'link';
+    """, (os.getenv("DB_NAME"), table_empresas))
+    result = cursor.fetchone()
+    if not result:
+        try:
+            cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link VARCHAR(2083);")
             connection.commit()
             print(f"[INFO] Coluna 'link' adicionada à tabela '{table_empresas}'.")
-        else:
-            print(f"[INFO] Coluna 'link' já existe na tabela '{table_empresas}'.")
-    except mysql.connector.Error as err:
-        print(f"[ERROR] Não foi possível alterar a tabela: {err}")
-
-def obter_empresa_por_nome(nome_empresa, connection):
-    """
-    Recupera a empresa pelo nome.
-    """
-    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
-    cursor = connection.cursor()
-    cursor.execute(f"SELECT id, link FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
-    return cursor.fetchone()
-
-def atualizar_link_empresa(empresa_id, novo_link, connection):
-    """
-    Atualiza o campo 'link' da empresa se o link for diferente.
-    """
-    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
-    cursor = connection.cursor()
-    cursor.execute(f"SELECT link FROM {table_empresas} WHERE id = %s", (empresa_id,))
-    resultado = cursor.fetchone()
-    link_atual = resultado[0] if resultado else None
-
-    if link_atual != novo_link:
-        cursor.execute(f"UPDATE {table_empresas} SET link = %s WHERE id = %s", (novo_link, empresa_id))
-        connection.commit()
-        print(f"[INFO] Link atualizado para a empresa ID {empresa_id}: {novo_link}")
+        except mysql.connector.Error as err:
+            print(f"[ERROR] Não foi possível adicionar a coluna 'link': {err}")
     else:
-        print(f"[INFO] Link para a empresa ID {empresa_id} não mudou.")
+        print(f"[INFO] A tabela '{table_empresas}' já possui a coluna 'link'.")
+    cursor.close()
 
-def fechar_sobreposicoes(driver):
-    """
-    Tenta fechar quaisquer sobreposições que possam estar bloqueando cliques.
-    """
-    try:
-        # Definir os seletores das sobreposições que precisam ser fechadas
-        sobreposicoes = [
-            # Se houver um botão de fechar para notificações
-            {"by": By.CSS_SELECTOR, "value": "button.close-notification"},
-            # Se houver um banner de cookies que ainda não foi fechado
-            {"by": By.ID, "value": "onetrust-accept-btn-handler"},
-            {"by": By.CSS_SELECTOR, "div.notifi__container"},
-            # Adicione outros seletores conforme necessário
-        ]
-        
-        for sobreposicao in sobreposicoes:
-            try:
-                elemento = WebDriverWait(driver, 2).until(
-                    EC.element_to_be_clickable((sobreposicao["by"], sobreposicao["value"]))
-                )
-                elemento.click()
-                print("[INFO] Sobreposição fechada.")
-            except (NoSuchElementException, TimeoutException):
-                pass  # Se o elemento não estiver presente, continue
-    except Exception as e:
-        print(f"[WARN] Erro ao tentar fechar sobreposições: {e}")
 
-def extrair_links_regra(connection):
+def conectar_selenium():
     """
-    Percorre todos os cards de parceiros, extrai o link das regras e atualiza no banco de dados.
+    Configura e retorna uma instância do WebDriver do Selenium.
     """
-    url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
-
     chrome_options = Options()
-    # Para depuração, execute o navegador com interface gráfica. Comente a linha abaixo.
-    chrome_options.add_argument("--headless")  # Executa o Chrome em modo headless
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument(
@@ -136,201 +83,170 @@ def extrair_links_regra(connection):
 
     driver = webdriver.Chrome(options=chrome_options)
     driver.set_window_size(1920, 1080)
+    return driver
 
-    print("[INFO] Abrindo página para extrair links das regras...")
-    driver.get(url)
 
-    # Tenta clicar no botão de cookies
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-        ).click()
-        print("[INFO] Cookies aceitos.")
-    except (NoSuchElementException, TimeoutException):
-        print("[INFO] Nenhum pop-up de cookies encontrado.")
-
-    # Espera os cards carregarem
+def extrair_cards(driver):
+    """
+    Extrai todos os elementos de cards de parceiros na página.
+    """
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
         )
         print("[INFO] Cards encontrados.")
+        cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
+        print(f"[INFO] Total de cards encontrados: {len(cards)}")
+        return cards
     except TimeoutException:
         print("[ERROR] Timeout ao esperar os cards.")
-        driver.quit()
-        return
+        return []
 
-    time.sleep(2)  # Pausa para garantir o carregamento
 
-    # Coleta todos os nomes das empresas para iterar posteriormente
-    cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
-    total_cards = len(cards)
-    print(f"[INFO] Total de cards encontrados: {total_cards}")
+def obter_empresa_id(nome_empresa, connection, table_empresas):
+    """
+    Recupera o ID da empresa pelo nome. Assume que o bot atual já populou a tabela.
+    """
+    cursor = connection.cursor()
+    cursor.execute(f"SELECT id FROM {table_empresas} WHERE nome = %s", (nome_empresa,))
+    empresa = cursor.fetchone()
+    cursor.close()
+    if empresa:
+        return empresa[0]
+    else:
+        print(f"[WARN] Empresa '{nome_empresa}' não encontrada na tabela.")
+        return None
 
-    # Coletar todos os nomes das empresas
-    nomes_empresas = []
-    for card in cards:
+
+def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
+    """
+    Atualiza o campo 'link' para a empresa especificada se for diferente.
+    """
+    cursor = connection.cursor()
+    cursor.execute(f"SELECT link FROM {table_empresas} WHERE id = %s", (empresa_id,))
+    resultado = cursor.fetchone()
+    link_atual = resultado[0] if resultado else None
+
+    if link_atual != link_novo:
         try:
-            img_tag = card.find_element(By.CSS_SELECTOR, "img.parity__card--img")
-            nome = img_tag.get_attribute("alt") if img_tag else "Nome não encontrado"
-            nomes_empresas.append(nome)
-        except Exception as e:
-            print(f"[ERROR] Erro ao coletar o nome de uma empresa: {e}")
-            nomes_empresas.append("Nome não encontrado")
+            cursor.execute(f"UPDATE {table_empresas} SET link = %s WHERE id = %s", (link_novo, empresa_id))
+            connection.commit()
+            print(f"[INFO] Link atualizado para a empresa ID {empresa_id}: {link_novo}")
+        except mysql.connector.Error as err:
+            print(f"[ERROR] Erro ao atualizar o link para a empresa ID {empresa_id}: {err}")
+    else:
+        print(f"[INFO] Link para a empresa ID {empresa_id} já está atualizado.")
 
-    # Iterar sobre a lista de nomes
-    for index, nome in enumerate(nomes_empresas, start=1):
+
+def processar_cards(driver, connection, table_empresas):
+    """
+    Itera sobre cada card, clica no botão 'Ir para regras do parceiro', obtém a URL e atualiza o banco.
+    """
+    cards = extrair_cards(driver)
+    for index in range(len(cards)):
         try:
-            print(f"[INFO] Processando {index}/{total_cards}: {nome}")
-
-            # Recarregar os cards para evitar StaleElementReferenceException
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
-            )
+            # Re-encontrar os cards para evitar StaleElementReferenceException
             cards = driver.find_elements(By.CSS_SELECTOR, "div.parity__card")
-
-            # Encontrar o card correspondente pelo nome
-            card = None
-            for c in cards:
-                try:
-                    img = c.find_element(By.CSS_SELECTOR, "img.parity__card--img")
-                    img_nome = img.get_attribute("alt")
-                    if img_nome == nome:
-                        card = c
-                        break
-                except NoSuchElementException:
-                    continue
-
-            if not card:
-                print(f"[WARN] Card para a empresa '{nome}' não encontrado.")
-                continue
-
-            # Fechar sobreposições antes de clicar
-            fechar_sobreposicoes(driver)
-
-            # Encontrar o botão "Ir para regras do parceiro" dentro do card
+            card = cards[index]
+            # Extrair o nome da empresa
             try:
-                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
+                img_tag = card.find_element(By.CSS_SELECTOR, "img.parity__card--img")
+                nome_empresa = img_tag.get_attribute("alt")
+                print(f"[INFO] Processando empresa: {nome_empresa}")
             except NoSuchElementException:
-                print(f"[WARN] Botão de regras não encontrado para a empresa '{nome}'.")
+                print("[WARN] Nome da empresa não encontrado no card.")
                 continue
 
-            # Tentar rolar até o botão para garantir que ele esteja visível
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", botao_regras)
-            time.sleep(0.5)  # Aguarda a rolagem
+            # Encontrar o botão 'Ir para regras do parceiro'
+            try:
+                botao_know_more = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link.gtm-link-event")
+            except NoSuchElementException:
+                print("[WARN] Botão 'Ir para regras do parceiro' não encontrado no card.")
+                continue
 
-            # Usar ActionChains para mover o mouse até o botão e clicar
-            actions = ActionChains(driver)
-            actions.move_to_element(botao_regras).click().perform()
+            # Abrir link em nova aba para evitar perder a página principal
+            link_know_more = botao_know_more.get_attribute("href")
+            if not link_know_more:
+                print("[WARN] Link do botão 'Ir para regras do parceiro' não encontrado.")
+                continue
 
-            # Esperar a nova página carregar completamente
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
+            # Abrir a URL em uma nova aba
+            driver.execute_script("window.open(arguments[0], '_blank');", link_know_more)
+            driver.switch_to.window(driver.window_handles[1])
 
-            # Obter a URL atual da página de regras
-            url_regra = driver.current_url
-            print(f"[INFO] URL das regras para '{nome}': {url_regra}")
+            # Esperar a página carregar
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            url_atual = driver.current_url
+            print(f"[INFO] URL obtida: {url_atual}")
+
+            # Fechar a aba e voltar para a principal
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
 
             # Atualizar o banco de dados
-            empresa = obter_empresa_por_nome(nome, connection)
-            if empresa:
-                empresa_id, link_atual = empresa
-                atualizar_link_empresa(empresa_id, url_regra, connection)
-            else:
-                print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
+            empresa_id = obter_empresa_id(nome_empresa, connection, table_empresas)
+            if empresa_id:
+                atualizar_link_no_banco(connection, table_empresas, empresa_id, url_atual)
 
-            # Navegar de volta para a página principal
-            driver.back()
-
-            # Esperar a página principal carregar novamente
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
-            )
-
-            # Pausar brevemente antes de processar o próximo card
+            # Pausa para evitar sobrecarga
             time.sleep(1)
 
-        except ElementClickInterceptedException as e:
-            print(f"[ERROR] Erro ao clicar no botão para a empresa '{nome}': {e}")
-            # Captura de tela para depuração
-            driver.save_screenshot(f"screenshot_error_{nome}.png")
-            # Tentar fechar possíveis sobreposições novamente
-            fechar_sobreposicoes(driver)
-            # Tentar clicar via JavaScript como fallback
-            try:
-                botao_regras = card.find_element(By.CSS_SELECTOR, "a.button__knowmore--link")
-                driver.execute_script("arguments[0].click();", botao_regras)
-
-                # Esperar a nova página carregar completamente
-                WebDriverWait(driver, 20).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-
-                # Obter a URL atual da página de regras
-                url_regra = driver.current_url
-                print(f"[INFO] URL das regras para '{nome}': {url_regra}")
-
-                # Atualizar o banco de dados
-                empresa = obter_empresa_por_nome(nome, connection)
-                if empresa:
-                    empresa_id, link_atual = empresa
-                    atualizar_link_empresa(empresa_id, url_regra, connection)
-                else:
-                    print(f"[WARN] Empresa '{nome}' não encontrada no banco de dados.")
-
-                # Navegar de volta para a página principal
-                driver.back()
-
-                # Esperar a página principal carregar novamente
-                WebDriverWait(driver, 20).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
-                )
-
-                # Pausar brevemente antes de processar o próximo card
-                time.sleep(1)
-
-            except Exception as e_inner:
-                print(f"[ERROR] Fallback: Não foi possível clicar no botão para a empresa '{nome}': {e_inner}")
-                # Captura de tela para depuração
-                driver.save_screenshot(f"screenshot_error_fallback_{nome}.png")
-                # Tentar navegar de volta caso algo falhe
-                try:
-                    driver.back()
-                    WebDriverWait(driver, 20).until(
-                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
-                    )
-                    print("[INFO] Voltando para a página principal após erro no fallback.")
-                except Exception as e_back:
-                    print(f"[ERROR] Erro ao tentar voltar para a página principal: {e_back}")
-                continue
-
+        except StaleElementReferenceException:
+            print("[ERROR] Referência do elemento está desatualizada. Reiniciando o processamento dos cards.")
+            break
         except Exception as e:
-            print(f"[ERROR] Erro ao processar a empresa '{nome}': {e}")
-            # Captura de tela para depuração
-            driver.save_screenshot(f"screenshot_error_{nome}.png")
-            # Tentar voltar para a página principal em caso de erro
-            try:
-                driver.get(url)
-                WebDriverWait(driver, 20).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.parity__card"))
-                )
-                print("[INFO] Voltando para a página principal após erro.")
-            except Exception as e_inner:
-                print(f"[ERROR] Erro ao tentar voltar para a página principal: {e_inner}")
-                # Captura de tela para depuração
-                driver.save_screenshot(f"screenshot_error_back_{nome}.png")
-                break  # Encerrar o loop se não for possível retornar
+            print(f"[ERROR] Ocorreu um erro inesperado: {e}")
+            continue
 
-    driver.quit()
-    print("[INFO] Extração e atualização de links concluída.")
 
 def main():
+    # Conectar ao banco de dados
     connection = conectar_banco()
-    if connection:
-        criar_tabela_link(connection)
-        extrair_links_regra(connection)
+    if not connection:
+        return
+
+    # Obter o nome da tabela de empresas
+    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
+
+    # Garantir que a tabela possui o campo 'link'
+    garantir_campo_link(connection, table_empresas)
+
+    # Configurar o Selenium
+    driver = conectar_selenium()
+
+    url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
+
+    print("[INFO] Abrindo página principal...")
+    driver.get(url)
+
+    # Tenta clicar no botão de cookies
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+        ).click()
+        print("[INFO] Cookies aceitos.")
+    except TimeoutException:
+        print("[INFO] Nenhum pop-up de cookies encontrado.")
+
+    # Esperar os cards carregarem
+    try:
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
+        )
+    except TimeoutException:
+        print("[ERROR] Timeout ao esperar os cards na página principal.")
+        driver.quit()
         connection.close()
+        return
+
+    # Processar os cards
+    processar_cards(driver, connection, table_empresas)
+
+    # Fechar o navegador e a conexão com o banco
+    driver.quit()
+    connection.close()
+    print("[INFO] Bot finalizado com sucesso.")
+
 
 if __name__ == "__main__":
     main()
