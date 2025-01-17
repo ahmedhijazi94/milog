@@ -1,10 +1,10 @@
-# .github/workflows/run_linkliv.yml/
+# .github/workflows/run_linkliv.yml
 
 name: Run Bot linkliv
 
 on:
   schedule:
-    - cron: '0 15 1 */2 *'  # Executa no dia 1 de cada 2 meses às 15h UTC
+    - cron: '0 15 1 * *'  # Executa no dia 1º de cada mês às 15h UTC
   push:
     branches:
       - main
