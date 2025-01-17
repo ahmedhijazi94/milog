@@ -1,7 +1,7 @@
-import os
+mport os
 import mysql.connector
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -36,10 +36,9 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
-def garantir_colunas(connection, table_empresas):
+def garantir_campo_link(connection, table_empresas):
     cursor = connection.cursor()
     try:
-        # Garantir coluna 'link'
         cursor.execute("""
             SELECT COLUMN_NAME 
             FROM INFORMATION_SCHEMA.COLUMNS 
@@ -53,78 +52,8 @@ def garantir_colunas(connection, table_empresas):
                 print(f"[INFO] Coluna 'link' adicionada à tabela '{table_empresas}'.")
             except mysql.connector.Error as err:
                 print(f"[ERROR] Não foi possível adicionar a coluna 'link': {err}")
-
-        # Garantir coluna 'link_update_date'
-        cursor.execute("""
-            SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = 'link_update_date';
-        """, (os.getenv("DB_NAME"), table_empresas))
-        result = cursor.fetchone()
-        if not result:
-            try:
-                cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link_update_date DATE;")
-                connection.commit()
-                print(f"[INFO] Coluna 'link_update_date' adicionada à tabela '{table_empresas}'.")
-            except mysql.connector.Error as err:
-                print(f"[ERROR] Não foi possível adicionar a coluna 'link_update_date': {err}")
         else:
-            print(f"[INFO] A tabela '{table_empresas}' já possui a coluna 'link_update_date'.")
-    finally:
-        cursor.close()
-
-def verificar_atualizacao(connection, table_empresas) -> bool:
-    """
-    Verifica se qualquer linha possui 'link_update_date' vazio ou com data superior a um mês.
-    Retorna True se for necessário executar o bot, caso contrário, False.
-    """
-    cursor = connection.cursor()
-    try:
-        cursor.execute(f"SELECT link_update_date FROM {table_empresas};")
-        resultados = cursor.fetchall()
-        data_atual = datetime.now().date()
-        data_limite = data_atual - timedelta(days=30)
-        for idx, (link_update_date,) in enumerate(resultados, start=1):
-            if link_update_date is None:
-                print(f"[INFO] Linha ID {idx} possui 'link_update_date' vazio.")
-                return True
-            # Verificar se link_update_date é string e convertê-la para datetime.date
-            if isinstance(link_update_date, str):
-                try:
-                    link_update_date = datetime.strptime(link_update_date, '%Y-%m-%d').date()
-                except ValueError as e:
-                    print(f"[ERROR] Erro ao analisar a data na linha {idx}: {e}")
-                    return True  # Tratar erro de análise como necessidade de atualização
-            elif isinstance(link_update_date, datetime):
-                link_update_date = link_update_date.date()
-            elif isinstance(link_update_date, date):
-                pass  # Já é um objeto date
-            else:
-                print(f"[WARN] Tipo desconhecido para 'link_update_date' na linha {idx}: {type(link_update_date)}")
-                return True  # Tratar tipos desconhecidos como necessidade de atualização
-
-            if link_update_date < data_limite:
-                print(f"[INFO] Linha ID {idx} possui 'link_update_date' anterior a um mês.")
-                return True
-        print("[INFO] Todas as linhas possuem 'link_update_date' atualizados há menos de um mês. Finalizando o bot.")
-        return False
-    except mysql.connector.Error as err:
-        print(f"[ERROR] Erro ao verificar a data de atualização: {err}")
-        return False
-    finally:
-        cursor.close()
-
-def atualizar_link_update_date_todas_linhas(connection, table_empresas):
-    """
-    Atualiza o campo 'link_update_date' para a data atual em todas as linhas da tabela.
-    """
-    cursor = connection.cursor()
-    try:
-        cursor.execute(f"UPDATE {table_empresas} SET link_update_date = %s;", (datetime.now().date(),))
-        connection.commit()
-        print(f"[INFO] Campo 'link_update_date' atualizado para todas as linhas na tabela '{table_empresas}'.")
-    except mysql.connector.Error as err:
-        print(f"[ERROR] Erro ao atualizar 'link_update_date': {err}")
+            print(f"[INFO] A tabela '{table_empresas}' já possui a coluna 'link'.")
     finally:
         cursor.close()
 
@@ -168,10 +97,7 @@ def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
 
         if link_atual != link_novo:
             try:
-                cursor.execute(
-                    f"UPDATE {table_empresas} SET link = %s WHERE id = %s",
-                    (link_novo, empresa_id)
-                )
+                cursor.execute(f"UPDATE {table_empresas} SET link = %s WHERE id = %s", (link_novo, empresa_id))
                 connection.commit()
                 print(f"[INFO] Link atualizado para a empresa ID {empresa_id}: {link_novo}")
             except mysql.connector.Error as err:
@@ -307,67 +233,53 @@ def main():
     if not connection:
         return
 
+    # Obter o nome da tabela de empresas
+    table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
+
+    # Garantir que a tabela possui o campo 'link'
+    garantir_campo_link(connection, table_empresas)
+
+    # Configurar o Selenium
+    driver = conectar_selenium()
+    if not driver:
+        connection.close()
+        return
+
+    url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
+
     try:
-        # Obter o nome da tabela de empresas
-        table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
+        print("[INFO] Abrindo página principal...")
+        driver.get(url)
 
-        # Garantir que a tabela possui os campos 'link' e 'link_update_date'
-        garantir_colunas(connection, table_empresas)
-
-        # Verificar se é necessário executar o bot
-        if not verificar_atualizacao(connection, table_empresas):
-            connection.close()
-            print("[INFO] Links já estão atualizados. Finalizando o bot.")
-            return
-
-        # Configurar o Selenium
-        driver = conectar_selenium()
-        if not driver:
-            connection.close()
-            return
-
-        url = "https://www.livelo.com.br/ganhe-pontos-compre-e-pontue"
-
+        # Tenta clicar no botão de cookies
         try:
-            print("[INFO] Abrindo página principal...")
-            driver.get(url)
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+            ).click()
+            print("[INFO] Cookies aceitos.")
+        except TimeoutException:
+            print("[INFO] Nenhum pop-up de cookies encontrado.")
 
-            # Tenta clicar no botão de cookies
-            try:
-                WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-                ).click()
-                print("[INFO] Cookies aceitos.")
-            except TimeoutException:
-                print("[INFO] Nenhum pop-up de cookies encontrado.")
-
-            # Esperar os cards carregarem
-            try:
-                WebDriverWait(driver, 20).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
-                )
-                print("[INFO] Cards encontrados na página principal.")
-            except TimeoutException:
-                print("[ERROR] Timeout ao esperar os cards na página principal.")
-                driver.quit()
-                connection.close()
-                return
-
-            # Processar os cards para obter e salvar os links
-            processar_cards(driver, connection, table_empresas)
-
-            # Atualizar 'link_update_date' para todas as linhas após processamento
-            atualizar_link_update_date_todas_linhas(connection, table_empresas)
-
-        finally:
-            # Fechar o navegador e a conexão com o banco
+        # Esperar os cards carregarem
+        try:
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.parity__card"))
+            )
+            print("[INFO] Cards encontrados na página principal.")
+        except TimeoutException:
+            print("[ERROR] Timeout ao esperar os cards na página principal.")
             driver.quit()
             connection.close()
-            print("[INFO] Bot finalizado com sucesso.")
+            return
 
-    except Exception as e:
-        print(f"[ERROR] Ocorreu um erro no processo principal: {e}")
+        # Processar os cards para obter e salvar os links
+        processar_cards(driver, connection, table_empresas)
+
+    finally:
+        # Fechar o navegador e a conexão com o banco
+        driver.quit()
         connection.close()
+        print("[INFO] Bot finalizado com sucesso.")
 
 if __name__ == "__main__":
     main()
