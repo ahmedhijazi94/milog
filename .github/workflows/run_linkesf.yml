@@ -1,0 +1,38 @@
+# .github/workflows/run_linkesf.yml
+
+name: Run Bot linkesf
+
+on:
+  schedule:
+    - cron: '0 15 15 * *'  # Executa no dia 15 de cada mês às 15h UTC
+  push:
+    branches:
+      - main
+
+jobs:
+  run_linkesf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mysql-connector-python beautifulsoup4 requests pandas lxml selenium
+
+      - name: Run Bot linkesf
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          TABLE_EMPRESAS_ESF: ${{ secrets.TABLE_EMPRESAS_ESF }}
+          TABLE_PONTUACAO_ESF: ${{ secrets.TABLE_PONTUACAO_ESF }}
+        run: python linkesf.py
