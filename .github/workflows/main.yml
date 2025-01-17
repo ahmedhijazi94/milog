@@ -62,3 +62,12 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         TABLE_BANNERS_LIV: ${{ secrets.TABLE_BANNERS_LIV }}
       run: python slid_liv.py  # Executa o terceiro bot (Slid Liv).
+
+    - name: Run Bot Slid_liv
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        TABLE_BANNERS_LIV: ${{ secrets.TABLE_BANNERS_LIV }}
+      run: python linkliv.py  # Executa o terceiro bot (Slid Liv).
