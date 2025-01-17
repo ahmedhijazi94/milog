@@ -30,7 +30,7 @@ jobs:
         pip install lxml
         pip install selenium
 
-    - name: Run Bot linkliv
+      - name: Run Bot linkesf
       env:
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_NAME: ${{ secrets.DB_NAME }}
@@ -38,6 +38,6 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
         # As variáveis para as tabelas do LIV
-        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_LIV }}
-        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_LIV }}
-      run: python linkliv.py  # Executa o terceiro bot (Slid Liv).
+        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_ESF }}
+        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_ESF }}
+      run: python linkesf.py  # Executa o terceiro bot (Slid Liv).
