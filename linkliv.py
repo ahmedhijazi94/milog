@@ -36,57 +36,6 @@ def conectar_banco():
         print(f"[ERROR] Não foi possível conectar ao banco de dados: {err}")
         return None
 
-def garantir_campos(connection, table_empresas):
-    cursor = connection.cursor()
-    try:
-        cursor.execute("""
-            SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME IN ('link', 'link_update_date');
-        """, (os.getenv("DB_NAME"), table_empresas))
-        result = cursor.fetchall()
-        colunas_existentes = [row[0] for row in result]
-        
-        # Verificar e adicionar a coluna 'link' se necessário
-        if 'link' not in colunas_existentes:
-            try:
-                cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link VARCHAR(2083);")
-                connection.commit()
-                print(f"[INFO] Coluna 'link' adicionada à tabela '{table_empresas}'.")
-            except mysql.connector.Error as err:
-                print(f"[ERROR] Não foi possível adicionar a coluna 'link': {err}")
-        
-        # Verificar e adicionar a coluna 'link_update_date' se necessário
-        if 'link_update_date' not in colunas_existentes:
-            try:
-                cursor.execute(f"ALTER TABLE {table_empresas} ADD COLUMN link_update_date DATETIME;")
-                connection.commit()
-                print(f"[INFO] Coluna 'link_update_date' adicionada à tabela '{table_empresas}'.")
-            except mysql.connector.Error as err:
-                print(f"[ERROR] Não foi possível adicionar a coluna 'link_update_date': {err}")
-        else:
-            print(f"[INFO] A tabela '{table_empresas}' já possui a coluna 'link_update_date'.")
-    finally:
-        cursor.close()
-
-def conectar_selenium():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")  # Atualizado para headless novo se disponível
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-    )
-
-    try:
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_window_size(1920, 1080)
-        return driver
-    except WebDriverException as e:
-        print(f"[ERROR] Não foi possível iniciar o WebDriver do Selenium: {e}")
-        return None
-
 def obter_primeira_link_update_date(connection, table_empresas):
     cursor = connection.cursor()
     try:
@@ -242,7 +191,7 @@ def processar_cards(driver, connection, table_empresas):
                         print(f"[INFO] Link para a empresa '{nome_empresa}' já está atualizado.")
                     continue  # Pula o clique, pois já extraiu o link
                 else:
-                    print(f"[INFO] Link não pôde ser extraído sem clicar. Processando o card.")
+                    print(f"[INFO] Link não pôde ser extrato sem clicar. Processando o card.")
 
                 # Fechar notificações que possam estar interferindo
                 fechar_notificacoes(driver)
@@ -318,9 +267,6 @@ def processar_cards(driver, connection, table_empresas):
 
         # Obter o nome da tabela de empresas
         table_empresas = get_env_var("TABLE_EMPRESAS_LIV")
-
-        # Garantir que a tabela possui os campos 'link' e 'link_update_date'
-        garantir_campos(connection, table_empresas)
 
         # Verificar a data da última atualização
         link_update_date = obter_primeira_link_update_date(connection, table_empresas)
