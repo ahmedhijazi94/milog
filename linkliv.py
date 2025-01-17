@@ -74,30 +74,42 @@ def garantir_colunas(connection, table_empresas):
         cursor.close()
 
 def verificar_atualizacao(connection, table_empresas) -> bool:
+    """
+    Verifica se qualquer linha possui 'link_update_date' vazio ou com data superior a um mês.
+    Retorna True se for necessário executar o bot, caso contrário, False.
+    """
     cursor = connection.cursor()
     try:
-        cursor.execute(f"SELECT link_update_date FROM {table_empresas} ORDER BY id LIMIT 1;")
-        resultado = cursor.fetchone()
-        if resultado:
-            link_update_date = resultado[0]
-            if link_update_date:
-                data_atual = datetime.now().date()
-                data_limite = data_atual - timedelta(days=30)
-                if link_update_date >= data_limite:
-                    print("[INFO] Links já foram atualizados há menos de um mês. Finalizando o bot.")
-                    return False
-                else:
-                    print("[INFO] A data de atualização dos links é maior que um mês. Executando o bot.")
-                    return True
-            else:
-                print("[INFO] 'link_update_date' está vazio. Executando o bot.")
+        cursor.execute(f"SELECT link_update_date FROM {table_empresas};")
+        resultados = cursor.fetchall()
+        data_atual = datetime.now().date()
+        data_limite = data_atual - timedelta(days=30)
+        for idx, (link_update_date,) in enumerate(resultados, start=1):
+            if link_update_date is None:
+                print(f"[INFO] Linha ID {idx} possui 'link_update_date' vazio.")
                 return True
-        else:
-            print("[WARN] Nenhuma linha encontrada na tabela. Executando o bot.")
-            return True
+            elif link_update_date < data_limite:
+                print(f"[INFO] Linha ID {idx} possui 'link_update_date' anterior a um mês.")
+                return True
+        print("[INFO] Todas as linhas possuem 'link_update_date' atualizados há menos de um mês. Finalizando o bot.")
+        return False
     except mysql.connector.Error as err:
         print(f"[ERROR] Erro ao verificar a data de atualização: {err}")
         return False
+    finally:
+        cursor.close()
+
+def atualizar_link_update_date_todas_linhas(connection, table_empresas):
+    """
+    Atualiza o campo 'link_update_date' para a data atual em todas as linhas da tabela.
+    """
+    cursor = connection.cursor()
+    try:
+        cursor.execute(f"UPDATE {table_empresas} SET link_update_date = %s;", (datetime.now().date(),))
+        connection.commit()
+        print(f"[INFO] Campo 'link_update_date' atualizado para todas as linhas na tabela '{table_empresas}'.")
+    except mysql.connector.Error as err:
+        print(f"[ERROR] Erro ao atualizar 'link_update_date': {err}")
     finally:
         cursor.close()
 
@@ -142,8 +154,8 @@ def atualizar_link_no_banco(connection, table_empresas, empresa_id, link_novo):
         if link_atual != link_novo:
             try:
                 cursor.execute(
-                    f"UPDATE {table_empresas} SET link = %s, link_update_date = %s WHERE id = %s",
-                    (link_novo, datetime.now().date(), empresa_id)
+                    f"UPDATE {table_empresas} SET link = %s WHERE id = %s",
+                    (link_novo, empresa_id)
                 )
                 connection.commit()
                 print(f"[INFO] Link atualizado para a empresa ID {empresa_id}: {link_novo}")
@@ -290,6 +302,7 @@ def main():
         # Verificar se é necessário executar o bot
         if not verificar_atualizacao(connection, table_empresas):
             connection.close()
+            print("[INFO] Links já estão atualizados. Finalizando o bot.")
             return
 
         # Configurar o Selenium
@@ -327,6 +340,9 @@ def main():
 
             # Processar os cards para obter e salvar os links
             processar_cards(driver, connection, table_empresas)
+
+            # Atualizar 'link_update_date' para todas as linhas após processamento
+            atualizar_link_update_date_todas_linhas(connection, table_empresas)
 
         finally:
             # Fechar o navegador e a conexão com o banco
