@@ -38,6 +38,6 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
         # As variáveis para as tabelas do LIV
-        TABLE_EMPRESAS_LIV: ${{ secrets.TABLE_EMPRESAS_ESF }}
-        TABLE_PONTUACAO_LIV: ${{ secrets.TABLE_PONTUACAO_ESF }}
+        TABLE_EMPRESAS_ESF: ${{ secrets.TABLE_EMPRESAS_ESF }}
+          TABLE_PONTUACAO_ESF: ${{ secrets.TABLE_PONTUACAO_ESF }}
       run: python linkesf.py  # Executa o terceiro bot (Slid Liv).
