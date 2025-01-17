@@ -39,5 +39,5 @@ jobs:
 
         # As variáveis para as tabelas do LIV
         TABLE_EMPRESAS_ESF: ${{ secrets.TABLE_EMPRESAS_ESF }}
-          TABLE_PONTUACAO_ESF: ${{ secrets.TABLE_PONTUACAO_ESF }}
+        TABLE_PONTUACAO_ESF: ${{ secrets.TABLE_PONTUACAO_ESF }}
       run: python linkesf.py  # Executa o terceiro bot (Slid Liv).
