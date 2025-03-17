@@ -1,6 +1,6 @@
 # .github/workflows/run_bots_daily.yml
 
-name: Run Bots Daily
+name: Run Bots Daily 2
 
 on:
   schedule:
